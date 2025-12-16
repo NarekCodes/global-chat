@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="login-screen" class="login-container">
+        <h1>Welcome</h1>
+        <input type="text" id="username-input" placeholder="Enter your username" autocomplete="off">
+        <button id="join-button">Join Chat</button>
+    </div>
+
+    <!-- Wrapper for chat and sidebar -->
+    <div class="main-container" id="main-interface" style="display: none;">
+        <div class="chat-container">
+            <header class="chat-header">
+                <h1>Global Chat Room</h1>
+            </header>
+            <div id="messages-area" class="messages-area">
+                <!-- Messages will be injected here -->
+            </div>
+            <div id="typing-indicator"></div>
+            <div class="input-area">
+                <button id="emoji-btn"
+                    style="font-size: 1.2rem; margin-right: 5px; cursor: pointer; background: none; border: none;">😊</button>
+                <input id="message-input" type="text" placeholder="Type a message..." autocomplete="off">
+                <button id="send-button">Send</button>
+
+                <div id="emoji-picker" class="emoji-picker" style="display: none;">
+                    <span>😊</span><span>😂</span><span>👍</span><span>❤️</span>
+                    <span>🎉</span><span>🙏</span><span>🥳</span><span>🤔</span>
+                    <span>😎</span><span>😭</span><span>🔥</span><span>💯</span>
+                    <span>👀</span><span>🚀</span><span>😁</span><span>👋</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="online-users" class="online-users-container">
+            <h3>Online Users</h3>
+            <ul id="user-list"></ul>
+        </div>
+    </div>
+
+    <div id="context-menu" class="context-menu" style="display: none;">
+        <div id="delete-me" class="context-option">Delete for Me</div>
+        <div id="delete-all" class="context-option">Delete for Everyone</div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+</body>
+
+</html>
