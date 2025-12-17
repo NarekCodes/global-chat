@@ -11,8 +11,10 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // In-memory message storage (Reverted to single store)
-const messages = [];
-const MAX_HISTORY_MESSAGES = 200;
+// In-memory message storage
+const globalHistory = [];
+const reportHistory = [];
+const HISTORY_LIMIT = 200;
 let currentLeaderId = null;
 const mutedUsers = new Set();
 
@@ -63,44 +65,49 @@ io.on('connection', (socket) => {
         socket.join('global');
 
         // Broadcast system message
+        // Broadcast system message
         const systemMessage = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
             username: 'SYSTEM',
             text: `${username} has joined the chat`
         };
         // Add to history
-        messages.push(systemMessage);
+        globalHistory.push(systemMessage);
         io.to('global').emit('new_message', systemMessage);
 
-        // Send history (Legacy/Simple)
-        socket.emit('load_history', messages);
+        // Send history (Standardized Event)
+        socket.emit('loadHistory', globalHistory);
 
         io.emit('online users', getOnlineUsernames());
     });
 
-    // Handle Join Room
-    socket.on('join_room', (room) => {
+    // Handle Switch Room (Force History Restoration)
+    socket.on('switchRoom', (roomName) => {
         if (socket.currentRoom) {
             socket.leave(socket.currentRoom);
         }
-        socket.currentRoom = room;
-        socket.join(room);
 
-        // Simple history hack: if returning to global, send global history
-        if (room === 'global') {
-            socket.emit('load_history', messages);
-        } else {
-            // Clear for report room (no persistent history in this reverted version)
-            socket.emit('load_history', []);
+        // Normalize room name if needed, but client sends what it sends.
+        // If client sends 'report', we use 'report'.
+        socket.currentRoom = roomName;
+        socket.join(roomName);
+
+        let historyToSend = [];
+        if (roomName === 'global') {
+            historyToSend = globalHistory;
+        } else if (roomName === 'report' || roomName.startsWith('report-')) {
+            // Report Room Logic
+            const isLeader = socket.id === currentLeaderId;
+            if (isLeader) {
+                historyToSend = reportHistory;
+            } else {
+                historyToSend = reportHistory.filter(m => m.sender === socket.username);
+            }
         }
+        socket.emit('loadHistory', historyToSend);
     });
 
-    // Request History (Backwards compat if client keeps emitting it)
-    socket.on('request_history', (room) => {
-        if (room === 'global') {
-            socket.emit('load_history', messages);
-        }
-    });
+    // Legacy request_history removed as we auto-send on switch.
 
     // Handle new message
     socket.on('send_message', (data) => {
@@ -122,8 +129,8 @@ io.on('connection', (socket) => {
                         text: `${username} is now the Leader!`,
                         timestamp: new Date().toLocaleTimeString()
                     };
-                    messages.push(sysMsg);
-                    if (messages.length > MAX_HISTORY_MESSAGES) messages.shift();
+                    globalHistory.push(sysMsg);
+                    if (globalHistory.length > HISTORY_LIMIT) globalHistory.shift();
 
                     io.emit('new_message', sysMsg);
                     io.emit('online users', getOnlineUsernames());
@@ -154,7 +161,7 @@ io.on('connection', (socket) => {
                             text: `${targetArg} has been kicked by the leader.`,
                             timestamp: new Date().toLocaleTimeString()
                         };
-                        messages.push(sysMsg);
+                        globalHistory.push(sysMsg);
                         io.emit('new_message', sysMsg);
                         io.emit('online users', getOnlineUsernames());
                     }
@@ -164,13 +171,84 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // ... (Other commands: /mute, /unmute, /delete - reusing simplified logic)
-            if (command === '/mute' || command === '/unmute' || command === '/delete' || command === '/help') {
-                // To save space, blindly accepting them but logging error? 
-                // No, I should include them to be "working".
-                // I will skip full re-implementation of all commands in this snippet to update quickly,
-                // BUT wait, if I overwrite the file, I lose them!
-                // I MUST include them.
+            if (command === '/mute') {
+                if (socket.id !== currentLeaderId) {
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You are not the leader.' });
+                    return;
+                }
+                const targetId = getTargetSocketId(targetArg);
+                if (targetId) {
+                    mutedUsers.add(targetId);
+                    io.to(targetId).emit('new_message', {
+                        id: Date.now() + Math.random(),
+                        username: 'SYSTEM',
+                        text: 'You have been muted by the leader.',
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: `${targetArg} has been muted.` });
+                } else {
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: `User ${targetArg} not found.` });
+                }
+                return;
+            }
+
+            if (command === '/unmute') {
+                if (socket.id !== currentLeaderId) {
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You are not the leader.' });
+                    return;
+                }
+                const targetId = getTargetSocketId(targetArg);
+                if (targetId) {
+                    mutedUsers.delete(targetId);
+                    io.to(targetId).emit('new_message', {
+                        id: Date.now() + Math.random(),
+                        username: 'SYSTEM',
+                        text: 'You have been unmuted.',
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: `${targetArg} has been unmuted.` });
+                } else {
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: `User ${targetArg} not found.` });
+                }
+                return;
+            }
+
+            if (command === '/delete') {
+                const msgId = targetArg;
+                // Use globalHistory for delete
+                const index = globalHistory.findIndex(m => m.id == msgId);
+
+                if (index !== -1) {
+                    const msg = globalHistory[index];
+                    const isLeader = socket.id === currentLeaderId;
+                    const isAuthor = msg.username === socket.username;
+
+                    if (isLeader || isAuthor) {
+                        globalHistory.splice(index, 1);
+                        io.emit('delete message', msgId);
+                    } else {
+                        socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You can only delete your own messages or be the leader.' });
+                    }
+                } else {
+                    socket.emit('new_message', { id: Date.now(), username: 'SYSTEM', text: 'Message not found in Global History.' });
+                }
+                return;
+            }
+
+            if (command === '/help') {
+                const generalCommands = ['/getleader', '/help'];
+                const leaderCommands = ['/kick {username}', '/mute {username}', '/unmute {username}', '/delete {id}'];
+
+                let availableCommands = [...generalCommands];
+                if (socket.id === currentLeaderId) {
+                    availableCommands = [...availableCommands, ...leaderCommands];
+                }
+
+                socket.emit('system message', {
+                    title: 'AVAILABLE COMMANDS:',
+                    commands: availableCommands
+                });
+                return;
             }
         }
 
@@ -187,34 +265,41 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const room = socket.currentRoom || 'global';
+
         const message = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
             username: username,
             text: text.replace(/warren/i, "Mr. Warren"),
-            timestamp: new Date().toLocaleTimeString()
+            timestamp: new Date().toLocaleTimeString(),
+            room: room
         };
 
-        const room = socket.currentRoom || 'global';
+        // Determine effective room type for history/logic
+        const isReport = room === 'report' || room.startsWith('report-');
 
-        if (room.startsWith('report-')) {
-            // Report Logic (No persistence in 'messages' array to avoid cluttering global history?)
-            // Just emit to room
-            io.to(room).emit('new_message', message);
+        if (isReport) {
+            const reportMsg = {
+                ...message,
+                sender: username,
+                room: 'report', // Force room name for consistency in history
+                time: Date.now()
+            };
+            reportHistory.push(reportMsg);
+            if (reportHistory.length > HISTORY_LIMIT) reportHistory.shift();
 
-            // Leader routing (Sidebar feature)
+            // Real-time dispatch
+            // 1. To Sender
+            socket.emit('new_message', reportMsg);
+
+            // 2. To Leader
             if (currentLeaderId && currentLeaderId !== socket.id) {
-                io.to(currentLeaderId).emit('private message', {
-                    ...message,
-                    sender: username,
-                    isPrivate: true,
-                    text: `[BUG REPORT] ${message.text}`,
-                    recipient: 'Leader'
-                });
+                io.to(currentLeaderId).emit('new_message', { ...reportMsg, text: `[BUG REPORT] ${reportMsg.text}` });
             }
         } else {
             // Global
-            messages.push(message);
-            if (messages.length > MAX_HISTORY_MESSAGES) messages.shift();
+            globalHistory.push(message);
+            if (globalHistory.length > HISTORY_LIMIT) globalHistory.shift();
             io.to('global').emit('new_message', message);
         }
     });

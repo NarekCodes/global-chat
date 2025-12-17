@@ -269,11 +269,11 @@ deleteAllBtn.addEventListener('click', () => {
 });
 
 
-// Load history
-socket.on('load_history', (history) => {
-    messagesArea.innerHTML = ''; // clear current
+// Load history (Force Restoration Logic)
+socket.on('loadHistory', (history) => {
+    messagesArea.innerHTML = ''; // Clear chat window logic as per prompt
     history.forEach((msg) => {
-        renderMessage(msg);
+        renderMessage(msg); // Calls existing display function
     });
 });
 
@@ -603,8 +603,8 @@ const roomReportBtn = document.getElementById('room-report');
 function joinRoom(room) {
     currentRoom = room;
 
-    socket.emit('join_room', room);
-    socket.emit('request_history', room); // Request history for new room
+    // Trigger Server Switch
+    socket.emit('switchRoom', room); // Server handles restoring history via loadHistory
 
     // Update UI
     messagesArea.innerHTML = ''; // Clear chat
@@ -613,10 +613,10 @@ function joinRoom(room) {
         roomNameDisplay.textContent = 'Global Chat Room';
         roomGlobalBtn.classList.add('active');
         roomReportBtn.classList.remove('active');
-        // Request history again? 
-        // socket.emit('request_history'); // If server supported it
     } else {
-        const displayText = room.replace('report-', 'Bug Report: ');
+        // Handle variations of report room naming if we still use 'report-'
+        // Server normalizes history but client might send 'report-username'
+        const displayText = room.startsWith('report') ? 'Bug Report (Private)' : room;
         roomNameDisplay.textContent = displayText;
         roomGlobalBtn.classList.remove('active');
         roomReportBtn.classList.add('active');
