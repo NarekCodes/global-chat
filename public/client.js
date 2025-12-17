@@ -96,6 +96,16 @@ function escapeHtml(text) {
 // Function to apply formatting
 function applyFormatting(text) {
     let formatted = escapeHtml(text);
+
+    // Image URL Detection and Rendering
+    // Matches URLs ending in .jpg, .jpeg, .png, .gif, .webp
+    // Use \b boundary to ensure extension is at the end of the URL
+    // Wrap in <a> for click-to-expand (opens in new tab)
+    formatted = formatted.replace(
+        /(https?:\/\/\S+?\.(?:jpg|jpeg|png|gif|webp))\b/gi,
+        '<a href="$1" target="_blank"><img src="$1" class="chat-image" alt="Image"></a>'
+    );
+
     // Bold: **text**
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
     // Italics: *text*
@@ -163,43 +173,78 @@ function renderMessage(data, isSelf = false) {
         container.appendChild(closeBtn);
         messageDiv.appendChild(container);
 
-    } else if (data.isPrivate) {
-        // DM Logic
-        messageDiv.classList.add('private-message');
-        const isMe = data.sender === username;
-        messageDiv.classList.add(isMe ? 'self' : 'other');
-
-        messageDiv.style.border = '2px solid #ff9800'; // Simple visual cue
-
-        const usernameSpan = document.createElement('span');
-        usernameSpan.classList.add('username');
-        if (isMe) {
-            usernameSpan.textContent = `[DM to ${data.recipient}]`;
-        } else {
-            usernameSpan.textContent = `[DM from ${data.sender}]`;
+    } else {
+        // Standard/Private Chat
+        if (data.isPrivate) {
+            messageDiv.classList.add('private-message');
+            messageDiv.style.border = '2px solid #ff9800';
         }
 
-        const contentSpan = document.createElement('span');
-        contentSpan.innerHTML = applyFormatting(data.text);
-
-        messageDiv.appendChild(usernameSpan);
-        messageDiv.appendChild(document.createTextNode(' ')); // Space
-        messageDiv.appendChild(contentSpan);
-    } else {
-        // Standard Chat
-        const isMe = data.username === username;
+        const isMe = data.username === username; // or data.sender for private
         messageDiv.classList.add(isMe ? 'self' : 'other');
 
         const usernameSpan = document.createElement('span');
         usernameSpan.classList.add('username');
-        usernameSpan.textContent = data.username;
+        if (data.isPrivate) {
+            const isSender = data.sender === username;
+            usernameSpan.textContent = isSender ? `[DM to ${data.recipient}]` : `[DM from ${data.sender}]`;
+        } else {
+            usernameSpan.textContent = data.username;
+        }
 
-        const contentSpan = document.createElement('span');
-        contentSpan.innerHTML = applyFormatting(data.text);
+        const contentSpan = document.createElement('div'); // div for media flexibility
+
+        let messageText = data.text;
+        let isMedia = false;
+
+        // Check for prefixes
+        if (messageText.startsWith('[URL]:')) {
+            messageText = messageText.substring(6);
+            isMedia = true;
+        } else if (messageText.startsWith('[FILE]:')) {
+            messageText = messageText.substring(7);
+            isMedia = true;
+        } else if (messageText.startsWith('data:image/') || messageText.startsWith('data:video/')) {
+            // Backward compatibility for old messages or direct pastes if any
+            isMedia = true;
+        }
+
+        // Helper to check extensions
+        const lowerText = messageText.toLowerCase();
+        const isImage = lowerText.match(/\.(jpeg|jpg|gif|png|webp)($|\?)/) || lowerText.startsWith('data:image/');
+        const isVideo = lowerText.match(/\.(mp4|webm|ogg)($|\?)/) || lowerText.startsWith('data:video/');
+
+        if (isMedia && isImage) {
+            const img = document.createElement('img');
+            img.src = messageText;
+            img.classList.add('chat-image');
+            img.alt = 'Image';
+
+            // Wrap in link for consistency/zoom
+            const link = document.createElement('a');
+            link.href = messageText;
+            link.target = '_blank';
+            link.appendChild(img);
+            contentSpan.appendChild(link);
+        } else if (isMedia && isVideo) {
+            const video = document.createElement('video');
+            video.src = messageText;
+            video.controls = true;
+            video.classList.add('chat-media-video'); // Class for styling
+            contentSpan.appendChild(video);
+        } else {
+            // Treat as text if not identified as media despite prefix, or standard text
+            // If it had a prefix but wasn't recognized media, we still show the URL/Data? 
+            // Better to show the link if it was [URL]
+            if (messageText.startsWith('http')) {
+                contentSpan.innerHTML = `<a href="${applyFormatting(messageText)}" target="_blank">${applyFormatting(messageText)}</a>`;
+            } else {
+                contentSpan.innerHTML = applyFormatting(messageText);
+            }
+        }
 
         messageDiv.appendChild(usernameSpan);
-        messageDiv.appendChild(document.createTextNode(' ')); // Space
-        messageDiv.appendChild(contentSpan);
+        messageDiv.appendChild(contentSpan); // Check spacing
     }
 
     messagesArea.appendChild(messageDiv);
@@ -432,22 +477,69 @@ function updateTypingIndicator() {
 }
 
 
-// Emoji Picker Logic
-const emojiBtn = document.getElementById('emoji-btn');
+// Media Menu Logic
+const actionBtn = document.getElementById('action-btn');
+const floatingMenu = document.getElementById('floating-menu');
+const menuEmoji = document.getElementById('menu-emoji');
+const menuUrl = document.getElementById('menu-url');
+const menuUpload = document.getElementById('menu-upload');
 const emojiPicker = document.getElementById('emoji-picker');
 
-emojiBtn.addEventListener('click', (e) => {
-    e.stopPropagation(); // Prevent document click from closing it immediately
-    emojiPicker.style.display = emojiPicker.style.display === 'none' ? 'grid' : 'none';
+const imageModal = document.getElementById('image-modal');
+const imageUrlInput = document.getElementById('image-url-input');
+const cancelImageBtn = document.getElementById('cancel-image-btn');
+const sendImageBtn = document.getElementById('send-image-btn');
+
+// Toggle Floating Menu
+actionBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = floatingMenu.style.display === 'flex';
+    floatingMenu.style.display = isVisible ? 'none' : 'flex';
+    if (!isVisible) {
+        emojiPicker.style.display = 'none'; // Close emoji picker if opening menu
+    }
 });
 
-// Close picker on outside click (handled by document listener below, but update it)
+// Emoji Menu Item
+menuEmoji.addEventListener('click', (e) => {
+    e.stopPropagation();
+    floatingMenu.style.display = 'none';
+    emojiPicker.style.display = 'grid'; // Use grid as per CSS
+});
+
+// URL Menu Item
+menuUrl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    floatingMenu.style.display = 'none';
+    imageModal.style.display = 'flex';
+    imageUrlInput.focus();
+});
+
+// Upload Menu Item
+menuUpload.addEventListener('click', (e) => {
+    e.stopPropagation();
+    floatingMenu.style.display = 'none';
+    fileInput.click();
+});
+
+// Close menus on outside click
 document.addEventListener('click', (e) => {
+    // Close context menu (existing)
     contextMenu.style.display = 'none';
 
-    // Also close emoji picker if click is not on the picker or the button
-    if (!emojiPicker.contains(e.target) && e.target !== emojiBtn) {
+    // Close floating menu
+    if (!floatingMenu.contains(e.target) && e.target !== actionBtn) {
+        floatingMenu.style.display = 'none';
+    }
+
+    // Close emoji picker
+    if (!emojiPicker.contains(e.target) && !menuEmoji.contains(e.target)) {
         emojiPicker.style.display = 'none';
+    }
+
+    // Close Modal on background click
+    if (e.target === imageModal) {
+        imageModal.style.display = 'none';
     }
 });
 
@@ -466,8 +558,32 @@ emojiPicker.querySelectorAll('span').forEach(span => {
         messageInput.selectionEnd = cursorPosition + emoji.length;
 
         messageInput.focus();
-        emojiPicker.style.display = 'none';
+        // emojiPicker.style.display = 'none'; // Optional: keep open or close
     });
+});
+
+
+// Image/URL Modal Logic
+cancelImageBtn.addEventListener('click', () => {
+    imageModal.style.display = 'none';
+    imageUrlInput.value = '';
+});
+
+sendImageBtn.addEventListener('click', () => {
+    const url = imageUrlInput.value.trim();
+    if (url) {
+        // Send URL message with prefix
+        socket.emit('send_message', { text: `[URL]:${url}` });
+        imageModal.style.display = 'none';
+        imageUrlInput.value = '';
+    }
+});
+
+// Allow Enter in Image Input
+imageUrlInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        sendImageBtn.click();
+    }
 });
 
 sendButton.addEventListener('click', sendMessage);
@@ -475,5 +591,74 @@ sendButton.addEventListener('click', sendMessage);
 messageInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         sendMessage();
+    }
+});
+
+// Room Switching Logic
+let currentRoom = 'global';
+const roomNameDisplay = document.getElementById('room-name-display');
+const roomGlobalBtn = document.getElementById('room-global');
+const roomReportBtn = document.getElementById('room-report');
+
+function joinRoom(room) {
+    currentRoom = room;
+
+    socket.emit('join_room', room);
+    socket.emit('request_history', room); // Request history for new room
+
+    // Update UI
+    messagesArea.innerHTML = ''; // Clear chat
+
+    if (room === 'global') {
+        roomNameDisplay.textContent = 'Global Chat Room';
+        roomGlobalBtn.classList.add('active');
+        roomReportBtn.classList.remove('active');
+        // Request history again? 
+        // socket.emit('request_history'); // If server supported it
+    } else {
+        const displayText = room.replace('report-', 'Bug Report: ');
+        roomNameDisplay.textContent = displayText;
+        roomGlobalBtn.classList.remove('active');
+        roomReportBtn.classList.add('active');
+    }
+}
+
+roomGlobalBtn.addEventListener('click', () => {
+    if (currentRoom !== 'global') {
+        joinRoom('global');
+    }
+});
+
+roomReportBtn.addEventListener('click', () => {
+    // Only if username is set
+    if (!username) return;
+    const reportRoom = `report-${username}`;
+    if (currentRoom !== reportRoom) {
+        joinRoom(reportRoom);
+    }
+});
+
+
+// File Upload Logic
+const fileInput = document.getElementById('file-input');
+
+fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (file) {
+        // Size Check (5MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+            alert('File is too large. Max size is 5MB.');
+            fileInput.value = '';
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const dataUrl = e.target.result;
+            // Send File message with prefix
+            socket.emit('send_message', { text: `[FILE]:${dataUrl}` });
+            fileInput.value = '';
+        };
+        reader.readAsDataURL(file);
     }
 });
