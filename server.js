@@ -40,7 +40,7 @@ io.on('connection', (socket) => {
         const users = [];
         for (let [id, socket] of io.of("/").sockets) {
             if (socket.username) {
-                users.push({ id: id, username: socket.username });
+                users.push({ id: id, username: socket.username, avatarUrl: socket.avatarUrl });
             }
         }
         return { users, leaderId: currentLeaderId };
@@ -56,18 +56,30 @@ io.on('connection', (socket) => {
     };
 
     // Handle setting username
-    socket.on('set username', (username) => {
+    socket.on('set username', (data) => {
+        let { username, avatarUrl } = typeof data === 'string' ? { username: data, avatarUrl: null } : data;
+
         if (username === "SYSTEM") {
             username = `STUPID HACKER`;
         }
 
+        // Server Guard: Check for spaces
+        if (username.includes(' ')) {
+            socket.emit('chat message', {
+                id: Date.now(),
+                username: 'SYSTEM',
+                text: 'Error: Usernames cannot contain spaces.'
+            });
+            return;
+        }
+
         socket.username = username;
+        socket.avatarUrl = avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`;
 
         // Default join global
         socket.currentRoom = 'global';
         socket.join('global');
 
-        // Broadcast system message
         // Broadcast system message
         const systemMessage = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
@@ -133,6 +145,16 @@ io.on('connection', (socket) => {
     // Legacy request_history removed as we auto-send on switch.
 
     // Handle new message
+    socket.on('typing', (data) => {
+        const room = data.room || 'global';
+        socket.to(room).emit('userTyping', socket.username || 'Anonymous');
+    });
+
+    socket.on('stopTyping', (data) => {
+        const room = data.room || 'global';
+        socket.to(room).emit('userStopTyping', socket.username || 'Anonymous');
+    });
+
     socket.on('chat message', (data) => {
         const username = socket.username || 'Anonymous';
         const text = data.text.trim();
@@ -374,6 +396,7 @@ io.on('connection', (socket) => {
         const message = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
             username: username,
+            avatarUrl: socket.avatarUrl,
             text: text.replace(/warren/i, "Mr. Warren"),
             timestamp: new Date().toLocaleTimeString(),
             room: room
