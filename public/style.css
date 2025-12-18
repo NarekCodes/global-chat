@@ -869,6 +869,10 @@ body {
     opacity: 1;
 }
 
+.message-container {
+    transition: opacity 0.2s ease-out;
+}
+
 .typing-dots {
     display: flex;
     gap: 3px;

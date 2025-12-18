@@ -63,18 +63,29 @@ io.on('connection', (socket) => {
             username = `STUPID HACKER`;
         }
 
-        // Server Guard: Check for spaces
+        // Server Guard 1: Username Check
         if (username.includes(' ')) {
-            socket.emit('chat message', {
-                id: Date.now(),
-                username: 'SYSTEM',
-                text: 'Error: Usernames cannot contain spaces.'
+            socket.emit('loginError', {
+                title: 'Invalid Username',
+                message: 'Usernames cannot contain spaces. Please use underscores instead.'
             });
             return;
         }
 
+        // Server Guard 2: Avatar URL Regex (if provided and not fallback)
+        if (avatarUrl && !avatarUrl.includes('ui-avatars.com')) {
+            const imageRegex = /\.(jpg|jpeg|png|webp|gif|svg)$/i;
+            if (!imageRegex.test(avatarUrl)) {
+                socket.emit('loginError', {
+                    title: 'Invalid URL',
+                    message: 'Please provide a direct link to an image file.'
+                });
+                return;
+            }
+        }
+
         socket.username = username;
-        socket.avatarUrl = avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random`;
+        socket.avatarUrl = avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random&color=fff`;
 
         // Default join global
         socket.currentRoom = 'global';
@@ -260,22 +271,53 @@ io.on('connection', (socket) => {
 
             if (command === '/delete') {
                 const msgId = targetArg;
-                // Use globalHistory for delete
-                const index = globalHistory.findIndex(m => m.id == msgId);
+                let found = false;
 
-                if (index !== -1) {
-                    const msg = globalHistory[index];
-                    const isLeader = socket.id === currentLeaderId;
-                    const isAuthor = msg.username === socket.username;
+                const deleteFromHistory = (historyArr) => {
+                    const idx = historyArr.findIndex(m => m.id == msgId);
+                    if (idx !== -1) {
+                        const msg = historyArr[idx];
+                        const isLeader = socket.id === currentLeaderId;
+                        const isAuthor = msg.username === socket.username;
 
-                    if (isLeader || isAuthor) {
-                        globalHistory.splice(index, 1);
-                        io.emit('delete message', msgId);
-                    } else {
-                        socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You can only delete your own messages or be the leader.' });
+                        if (isLeader || isAuthor) {
+                            historyArr.splice(idx, 1);
+                            found = true;
+                            return true;
+                        } else {
+                            socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You can only delete your own messages or be the leader.' });
+                            found = true; // Stop searching if permission denied
+                            return false;
+                        }
                     }
-                } else {
-                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Message not found in Global History.' });
+                    return false;
+                };
+
+                // 1. Try Global
+                if (deleteFromHistory(globalHistory)) {
+                    io.emit('delete message', msgId);
+                    return;
+                }
+                if (found) return;
+
+                // 2. Try Report
+                if (deleteFromHistory(reportHistory)) {
+                    io.emit('delete message', msgId);
+                    return;
+                }
+                if (found) return;
+
+                // 3. Try Match Histories
+                for (const matchRoomId in matchHistory) {
+                    if (deleteFromHistory(matchHistory[matchRoomId])) {
+                        io.to(matchRoomId).emit('delete message', msgId);
+                        return;
+                    }
+                    if (found) return;
+                }
+
+                if (!found) {
+                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Message not found in any history.' });
                 }
                 return;
             }

@@ -28,6 +28,24 @@ let typingTimeout;
 let isTyping = false;
 let partnerNames = {}; // roomID -> partnerName
 
+const getFallbackAvatar = (name) => `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff`;
+
+function validateAvatar(url, callback) {
+    if (!url) return callback(true, getFallbackAvatar(usernameInput.value.trim()));
+
+    // Regex Check
+    const imageRegex = /\.(jpg|jpeg|png|webp|gif|svg)$/i;
+    if (!imageRegex.test(url)) {
+        return callback(false);
+    }
+
+    // Load Test
+    const img = new Image();
+    img.onload = () => callback(true, url);
+    img.onerror = () => callback(false);
+    img.src = url;
+}
+
 // Login logic
 joinButton.addEventListener('click', () => {
     let name = usernameInput.value.trim();
@@ -35,20 +53,45 @@ joinButton.addEventListener('click', () => {
 
     if (!name) return;
 
-    // Username Validation: Strictly NO spaces
+    // Check 1: Username (Strictly NO spaces)
     if (name.includes(' ')) {
-        showError('Usernames cannot have spaces. Please use underscores (_) or hyphens (-).');
+        showError('Invalid Username', 'Usernames cannot contain spaces. Please use underscores instead.');
         return;
     }
 
-    if (name) {
+    // Check 2: Empty URL (allow fallback)
+    if (!avatarUrl) {
         username = name;
-        socket.emit('set username', { username, avatarUrl });
+        socket.emit('set username', { username, avatarUrl: getFallbackAvatar(name) });
         loginScreen.style.display = 'none';
-        if (mainInterface) {
-            mainInterface.style.display = 'flex'; // Use flex for side-by-side
-        }
+        if (mainInterface) mainInterface.style.display = 'flex';
+        return;
     }
+
+    // Check 3: URL Regex Format
+    const imageRegex = /\.(jpg|jpeg|png|webp|gif|svg)$/i;
+    if (!imageRegex.test(avatarUrl)) {
+        showError('Invalid URL', 'Please provide a direct link to an image file (e.g., .jpg, .png, .webp).');
+        return;
+    }
+
+    // Check 4: URL Accessibility (Silent Load Test)
+    const img = new Image();
+    img.onload = () => {
+        username = name;
+        socket.emit('set username', { username, avatarUrl: avatarUrl });
+        loginScreen.style.display = 'none';
+        if (mainInterface) mainInterface.style.display = 'flex';
+    };
+    img.onerror = () => {
+        showError('Image Not Found', 'This link is not working or is not a public image.');
+    };
+    img.src = avatarUrl;
+});
+
+// Handle Login Errors from Server
+socket.on('loginError', ({ title, message }) => {
+    showError(title, message);
 });
 
 // Also allow Enter key on login input
@@ -127,7 +170,7 @@ function applyFormatting(text) {
     // Wrap in <a> for click-to-expand (opens in new tab)
     formatted = formatted.replace(
         /(https?:\/\/\S+?\.(?:jpg|jpeg|png|gif|webp))\b/gi,
-        '<a href="$1" target="_blank"><img src="$1" class="chat-image" alt="Image"></a>'
+        (match) => `<a href="${match}" target="_blank"><img src="${match}" class="chat-image" alt="Image" onerror="this.src='https://ui-avatars.com/api/?name=Image&background=random'; this.onerror=null;"></a>`
     );
 
     // Bold: **text**
@@ -139,6 +182,13 @@ function applyFormatting(text) {
 
 // Helper to render a message
 function renderMessage(data, isSelf = false) {
+    if (!data.id) data.id = Date.now() + Math.random().toString(36).substr(2, 9);
+
+    // Unified Container
+    const container = document.createElement('div');
+    container.classList.add('message-container');
+    container.id = `msg-${data.id}`;
+
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message');
     // Store message ID
@@ -243,6 +293,10 @@ function renderMessage(data, isSelf = false) {
             img.src = messageText;
             img.classList.add('chat-image');
             img.alt = 'Image';
+            img.onerror = function () {
+                this.onerror = null;
+                this.src = 'https://ui-avatars.com/api/?name=Image&background=random';
+            };
 
             // Wrap in link for consistency/zoom
             const link = document.createElement('a');
@@ -281,8 +335,14 @@ function renderMessage(data, isSelf = false) {
         avatarContainer.classList.add('avatar-container');
 
         const avatarImg = document.createElement('img');
-        avatarImg.src = data.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.username)}&background=random`;
+        const fallback = getFallbackAvatar(data.username);
+        avatarImg.src = data.avatarUrl || fallback;
         avatarImg.classList.add('avatar-img');
+        // Smart Fallback Runtime Guard
+        avatarImg.onerror = function () {
+            this.onerror = null; // Prevent infinite loops
+            this.src = fallback;
+        };
 
         // Leader standout styling
         if (data.username !== 'SYSTEM' && currentLeaderId && data.id === currentLeaderId) {
@@ -304,7 +364,9 @@ function renderMessage(data, isSelf = false) {
     messageContent.appendChild(messageDiv);
     wrapper.appendChild(messageContent);
 
-    messagesArea.appendChild(wrapper);
+    container.appendChild(wrapper);
+
+    messagesArea.appendChild(container);
     messagesArea.scrollTop = messagesArea.scrollHeight;
     window.scrollTo(0, document.body.scrollHeight);
 }
@@ -341,11 +403,10 @@ socket.on('chat message', (msg) => {
 
 // Receive message delete event
 socket.on('delete message', (id) => {
-    const el = document.querySelector(`.message[data-id="${id}"]`);
+    const el = document.getElementById(`msg-${id}`);
     if (el) {
-        // Optional: Animate out? 
         el.style.opacity = '0';
-        setTimeout(() => el.remove(), 300); // Simple fade out effect if combined with CSS transition
+        setTimeout(() => el.remove(), 200); // 200ms matches CSS transition
     }
 });
 
@@ -417,8 +478,13 @@ socket.on('online users', (data) => {
         const li = document.createElement('li');
 
         const avatarImg = document.createElement('img');
-        avatarImg.src = user.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=random`;
+        const fallback = getFallbackAvatar(user.username);
+        avatarImg.src = user.avatarUrl || fallback;
         avatarImg.classList.add('user-list-avatar');
+        avatarImg.onerror = function () {
+            this.onerror = null;
+            this.src = fallback;
+        };
         if (leaderId && user.id === leaderId) {
             avatarImg.classList.add('leader-avatar');
         }
@@ -598,10 +664,12 @@ document.addEventListener('click', (e) => {
     }
 });
 
-function showError(message) {
-    // Note: Heading and body are handled in HTML/CSS for this redesign
-    // but message text can still be dynamic if needed.
-    // For now, it uses the direct text requested by user in HTML.
+function showError(title, message) {
+    const heading = document.getElementById('error-heading');
+    const text = document.getElementById('error-message-text');
+    if (heading) heading.textContent = title;
+    if (text) text.textContent = message;
+
     errorModal.style.display = 'flex';
     closeErrorBtn.focus();
 }
