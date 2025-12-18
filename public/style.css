@@ -560,6 +560,7 @@ body {
     border-radius: 12px;
     border: 1px solid rgba(0, 0, 0, 0.1);
 }
+
 /* Sidebar Styles */
 .sidebar {
     width: 25%;
@@ -600,28 +601,93 @@ body {
     background: white;
     font-weight: bold;
     color: var(--primary-color);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
 }
 
 /* Adjust main container to accommodate sidebar */
 .main-container .chat-container {
-    width: 50%; /* Adjusted from 70% */
+    width: 50%;
+    /* Adjusted from 70% */
     border-left: none;
 }
 
 .online-users-container {
-    width: 25%; /* Adjusted from 30% */
+    width: 25%;
+    /* Adjusted from 30% */
 }
 
 /* Mobile */
 @media (max-width: 768px) {
     .sidebar {
-        display: none; /* For now, or toggle */
+        display: none;
+        /* For now, or toggle */
     }
+
     .main-container .chat-container {
         width: 100%;
     }
+
+    .active-room {
+        background: rgba(255, 255, 255, 0.2) !important;
+        border-left: 4px solid #6a11cb !important;
+        font-weight: bold;
+    }
+
     .online-users-container {
         display: none;
     }
+}
+
+/* Match Modal Glassmorphism & Animation */
+.match-modal-content {
+    background: rgba(18, 18, 18, 0.75) !important;
+    backdrop-filter: blur(15px) !important;
+    -webkit-backdrop-filter: blur(15px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: white !important;
+    border-radius: 24px !important;
+    padding: 40px !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8) !important;
+    animation: popIn 0.5s cubic-bezier(0.26, 0.53, 0.74, 1.48) forwards !important;
+}
+
+#match-heading {
+    font-size: 2rem;
+    margin-bottom: 15px;
+    background: linear-gradient(to right, #fff, #ffd700);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+#match-partner-name {
+    font-size: 1.2rem;
+}
+
+@keyframes popIn {
+    0% {
+        opacity: 0;
+        transform: scale(0.5) translateY(20px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.match-modal-content .primary-btn {
+    background: linear-gradient(to right, #6a11cb, #2575fc);
+    border: none;
+    padding: 12px 30px;
+    font-size: 1.1rem;
+    border-radius: 30px;
+    margin-top: 20px;
+    box-shadow: 0 4px 15px rgba(106, 17, 203, 0.4);
+    transition: all 0.3s ease;
+}
+
+.match-modal-content .primary-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(106, 17, 203, 0.6);
 }

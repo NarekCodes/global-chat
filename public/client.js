@@ -263,7 +263,7 @@ deleteMeBtn.addEventListener('click', () => {
 
 deleteAllBtn.addEventListener('click', () => {
     if (selectedMessageId) {
-        socket.emit('send_message', { text: '/delete ' + selectedMessageId });
+        socket.emit('chat message', { text: '/delete ' + selectedMessageId, room: currentRoom });
     }
     contextMenu.style.display = 'none';
 });
@@ -278,7 +278,7 @@ socket.on('loadHistory', (history) => {
 });
 
 // Receive new message
-socket.on('new_message', (msg) => {
+socket.on('chat message', (msg) => {
     renderMessage(msg);
 });
 
@@ -396,8 +396,12 @@ function sendMessage() {
                 text: text
             });
         } else {
-            // Send Public
-            socket.emit('send_message', { text });
+            // Send with room context to prevent global leaks
+            socket.emit('chat message', {
+                text: text,
+                room: currentRoom,
+                sender: username
+            });
         }
         messageInput.value = '';
         messageInput.focus();
@@ -573,7 +577,7 @@ sendImageBtn.addEventListener('click', () => {
     const url = imageUrlInput.value.trim();
     if (url) {
         // Send URL message with prefix
-        socket.emit('send_message', { text: `[URL]:${url}` });
+        socket.emit('chat message', { text: `[URL]:${url}`, room: currentRoom, sender: username });
         imageModal.style.display = 'none';
         imageUrlInput.value = '';
     }
@@ -596,6 +600,27 @@ messageInput.addEventListener('keypress', (e) => {
 
 // Room Switching Logic
 let currentRoom = 'global';
+let partnerNames = {}; // roomID -> partnerName
+
+function setActiveRoom(roomID) {
+    // Highlighting logic
+    const allButtons = document.querySelectorAll('.room-btn');
+    allButtons.forEach(btn => btn.classList.remove('active-room', 'active'));
+
+    // Find the button for this room
+    let targetId = roomID;
+    if (roomID === 'global') targetId = 'room-global';
+    else if (roomID.startsWith('report-')) targetId = 'room-report';
+    else if (roomID.startsWith('match_')) targetId = 'room-match';
+
+    const targetBtn = document.getElementById(targetId);
+    if (targetBtn) {
+        targetBtn.classList.add('active-room');
+        // Backward compatibility if some styles use .active
+        targetBtn.classList.add('active');
+    }
+}
+
 const roomNameDisplay = document.getElementById('room-name-display');
 const roomGlobalBtn = document.getElementById('room-global');
 const roomReportBtn = document.getElementById('room-report');
@@ -603,23 +628,23 @@ const roomReportBtn = document.getElementById('room-report');
 function joinRoom(room) {
     currentRoom = room;
 
-    // Trigger Server Switch
-    socket.emit('switchRoom', room); // Server handles restoring history via loadHistory
+    // UI Feedback
+    setActiveRoom(room);
 
-    // Update UI
-    messagesArea.innerHTML = ''; // Clear chat
+    // Trigger Server Switch
+    socket.emit('switchRoom', room);
+    socket.emit('getHistory', room);
+
+    // Reliable History Loading: Clear window
+    messagesArea.innerHTML = '';
 
     if (room === 'global') {
         roomNameDisplay.textContent = 'Global Chat Room';
-        roomGlobalBtn.classList.add('active');
-        roomReportBtn.classList.remove('active');
-    } else {
-        // Handle variations of report room naming if we still use 'report-'
-        // Server normalizes history but client might send 'report-username'
-        const displayText = room.startsWith('report') ? 'Bug Report (Private)' : room;
-        roomNameDisplay.textContent = displayText;
-        roomGlobalBtn.classList.remove('active');
-        roomReportBtn.classList.add('active');
+    } else if (room.startsWith('report-')) {
+        roomNameDisplay.textContent = 'Bug Report (Private)';
+    } else if (room.startsWith('match_')) {
+        const name = partnerNames[room] || 'Private Match';
+        roomNameDisplay.textContent = `Chat with ${name}`;
     }
 }
 
@@ -638,6 +663,75 @@ roomReportBtn.addEventListener('click', () => {
     }
 });
 
+// Matchmaking Logic
+const sidebar = document.getElementById('sidebar'); // Ensure sidebar is selectable
+let matchButton = null;
+
+function toggleMatchButton(show, roomID, partnerName) {
+    if (show) {
+        if (partnerName) {
+            partnerNames[roomID] = partnerName;
+        }
+        const displayName = partnerName ? `👥 Chat with ${partnerName}` : '👥 Private Match';
+
+        if (!matchButton) {
+            matchButton = document.createElement('button');
+            matchButton.id = 'room-match';
+            matchButton.className = 'room-btn';
+            matchButton.innerHTML = displayName;
+            matchButton.addEventListener('click', () => {
+                if (currentRoom !== roomID) {
+                    joinRoom(roomID);
+                }
+            });
+            // Insert after Report button
+            if (roomReportBtn && roomReportBtn.parentNode) {
+                roomReportBtn.parentNode.insertBefore(matchButton, roomReportBtn.nextSibling);
+            } else {
+                sidebar.appendChild(matchButton);
+            }
+        } else {
+            matchButton.innerHTML = displayName;
+        }
+        matchButton.style.display = 'block';
+    } else {
+        if (matchButton) {
+            matchButton.style.display = 'none';
+        }
+    }
+}
+
+socket.on('matchStarted', (data) => {
+    const { roomID, partnerName } = data;
+    // Show button with name
+    toggleMatchButton(true, roomID, partnerName);
+
+    // Show professional modal instead of alert
+    const matchModal = document.getElementById('match-modal');
+    const matchPartnerName = document.getElementById('match-partner-name');
+    const startMatchBtn = document.getElementById('start-match-btn');
+
+    matchPartnerName.textContent = partnerName;
+    matchModal.style.display = 'flex';
+
+    startMatchBtn.onclick = () => {
+        matchModal.style.display = 'none';
+        joinRoom(roomID);
+    };
+});
+
+socket.on('matchEnded', () => {
+    // Hide button
+    toggleMatchButton(false);
+
+    // Auto-switch back to global if we were in the match
+    if (currentRoom.startsWith('match_')) {
+        joinRoom('global');
+    }
+
+    // Optional: Visual cue (Maybe use modal later, but for now just clear)
+    // alert('Match Ended. Returning to Global Chat.');
+});
 
 // File Upload Logic
 const fileInput = document.getElementById('file-input');
@@ -656,7 +750,7 @@ fileInput.addEventListener('change', () => {
         reader.onload = (e) => {
             const dataUrl = e.target.result;
             // Send File message with prefix
-            socket.emit('send_message', { text: `[FILE]:${dataUrl}` });
+            socket.emit('chat message', { text: `[FILE]:${dataUrl}`, room: currentRoom, sender: username });
             fileInput.value = '';
         };
         reader.readAsDataURL(file);
