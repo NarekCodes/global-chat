@@ -197,6 +197,57 @@ body {
     max-width: 90%;
 }
 
+/* Message Button (Telegram Style) */
+.msg-btn {
+    margin-left: auto;
+    background: rgba(106, 17, 203, 0.1);
+    border: none;
+    border-radius: 50%;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0.8;
+    color: var(--primary-color);
+}
+
+.msg-btn:hover {
+    background: var(--primary-color);
+    color: white;
+    box-shadow: 0 4px 12px rgba(106, 17, 203, 0.3);
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.msg-btn:active {
+    transform: scale(0.95);
+}
+
+.notification-dot {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: #ff3b30;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: bold;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    z-index: 10;
+    pointer-events: none;
+}
+
 .main-container {
     display: flex;
     width: 90%;
@@ -263,14 +314,19 @@ body {
 }
 
 .online-users-container li {
-    padding: 10px;
+    padding: 10px 15px;
     margin-bottom: 8px;
     background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     display: flex;
     align-items: center;
     font-weight: 500;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.online-users-container li:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .online-users-container li::before {
@@ -315,28 +371,118 @@ body {
     text-shadow: 1px 1px 0px rgba(0, 0, 0, 0.1);
 }
 
+/* Glassmorphism Context Menu */
 .context-menu {
     position: fixed;
-    /* Fixed to handle scrolling better? Or absolute relative to body */
-    background: #fff;
-    border: 1px solid #ccc;
-    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
-    z-index: 1000;
-    border-radius: 4px;
-    overflow: hidden;
-    width: 160px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.3);
+    padding: 6px;
+    min-width: 170px;
+    z-index: 10000;
+    pointer-events: all;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
 }
 
-.context-option {
-    padding: 10px 15px;
+.context-item {
+    padding: 10px 14px;
+    border-radius: 8px;
     cursor: pointer;
     font-size: 0.9rem;
-    color: #333;
-    transition: background 0.1s;
+    font-weight: 500;
+    color: #1a1a1a;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
-.context-option:hover {
-    background-color: #f0f0f0;
+.ctx-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    stroke-width: 2.5;
+}
+
+.context-item:hover {
+    background: rgba(255, 255, 255, 0.3);
+    color: var(--primary-color);
+    transform: translateX(4px);
+}
+
+.context-item.danger-action {
+    color: #ff3b30;
+    font-weight: 600;
+}
+
+.context-item.danger-action:hover {
+    background: rgba(255, 59, 48, 0.1);
+}
+
+.context-divider {
+    border: 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.2);
+    margin: 4px 0;
+}
+
+/* Reply Preview UI */
+.reply-preview {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(106, 17, 203, 0.05);
+    border-left: 4px solid var(--primary-color);
+    padding: 8px 15px;
+    border-radius: 8px 8px 0 0;
+    margin-bottom: -1px;
+    font-size: 0.85rem;
+    color: #444;
+}
+
+.reply-preview #reply-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80%;
+}
+
+.reply-preview #cancel-reply {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #999;
+    padding: 0 5px;
+    transition: color 0.2s ease;
+}
+
+.reply-preview #cancel-reply:hover {
+    color: #ff3b30;
+}
+
+/* Rendered Reply Context inside Message Bubble */
+.message-reply-ctx {
+    background: rgba(0, 0, 0, 0.05);
+    border-left: 3px solid var(--primary-color);
+    padding: 5px 10px;
+    border-radius: 4px;
+    margin: 5px 0;
+    font-size: 0.8rem;
+    color: #666;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.self .message-reply-ctx {
+    background: rgba(255, 255, 255, 0.2);
+    border-left-color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .input-area {
@@ -605,6 +751,8 @@ body {
     font-size: 0.95rem;
     color: #333;
     transition: background 0.2s;
+    position: relative;
+    /* For notification dots */
 }
 
 .room-btn:hover {
@@ -910,4 +1058,53 @@ body {
 
 #typing-text {
     font-weight: 500;
+}
+
+/* Sidebar Pulse Animation */
+.pulse-notice {
+    animation: pulse-glow 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-glow {
+    from {
+        box-shadow: 0 0 5px rgba(106, 17, 203, 0.2);
+        background-color: transparent;
+    }
+
+    to {
+        box-shadow: 0 0 15px rgba(106, 17, 203, 0.6);
+        background-color: rgba(106, 17, 203, 0.1);
+    }
+}
+
+/* Mention Tag Highlighting */
+.mention-tag {
+    color: #ffd700;
+    /* Gold for a high-taste feel */
+    font-weight: 700;
+    padding: 0 2px;
+    border-radius: 4px;
+    background: rgba(255, 215, 0, 0.1);
+}
+
+/* @Mention Glow Effect */
+.mention-glow {
+    animation: glowRed 1.5s ease-out;
+}
+
+@keyframes glowRed {
+    0% {
+        background-color: transparent;
+        box-shadow: none;
+    }
+
+    20% {
+        background-color: rgba(255, 0, 0, 0.2);
+        box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
+    }
+
+    100% {
+        background-color: transparent;
+        box-shadow: none;
+    }
 }

@@ -14,9 +14,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // In-memory message storage
 const globalHistory = [];
 const reportHistory = [];
+const privateChatHistory = {}; // Persistent DM storage
 const HISTORY_LIMIT = 200;
 let currentLeaderId = null;
-const mutedUsers = new Set();
+const mutedUsers = new Set(); // Stores usernames
 let waitingUsers = [];
 let activeMatches = {}; // socket.id -> roomID
 let matchHistory = {}; // roomID -> messages[]
@@ -53,6 +54,12 @@ io.on('connection', (socket) => {
             }
         }
         return null;
+    };
+
+    const broadcastMutedUsers = () => {
+        if (currentLeaderId) {
+            io.to(currentLeaderId).emit('mutedUsersUpdate', Array.from(mutedUsers));
+        }
     };
 
     // Handle setting username
@@ -105,16 +112,29 @@ io.on('connection', (socket) => {
         socket.emit('loadHistory', globalHistory);
 
         io.emit('online users', getOnlineUsernames());
+        broadcastMutedUsers();
     });
 
     // Handle Switch Room (Force History Restoration)
     socket.on('switchRoom', (roomName) => {
+        // Security Check for Private Rooms
+        if (roomName.startsWith('private_')) {
+            const parts = roomName.split('_');
+            const user1 = parts[1];
+            const user2 = parts[2];
+            const isLeader = socket.id === currentLeaderId;
+            const isParticipant = socket.username === user1 || socket.username === user2;
+
+            if (!isParticipant && !isLeader) {
+                socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Access Denied: You are not a participant in this private chat.' });
+                return;
+            }
+        }
+
         if (socket.currentRoom) {
             socket.leave(socket.currentRoom);
         }
 
-        // Normalize room name if needed, but client sends what it sends.
-        // If client sends 'report', we use 'report'.
         socket.currentRoom = roomName;
         socket.join(roomName);
 
@@ -122,7 +142,6 @@ io.on('connection', (socket) => {
         if (roomName === 'global') {
             historyToSend = globalHistory;
         } else if (roomName === 'report' || roomName.startsWith('report-')) {
-            // Report Room Logic
             const isLeader = socket.id === currentLeaderId;
             if (isLeader) {
                 historyToSend = reportHistory;
@@ -130,13 +149,24 @@ io.on('connection', (socket) => {
                 historyToSend = reportHistory.filter(m => m.sender === socket.username);
             }
         } else if (roomName.startsWith('match_')) {
-            // Match Room History
             historyToSend = matchHistory[roomName] || [];
+        } else if (roomName.startsWith('private_')) {
+            historyToSend = privateChatHistory[roomName] || [];
         }
         socket.emit('loadHistory', historyToSend);
     });
 
     socket.on('getHistory', (roomName) => {
+        // ... (existing code for security check)
+        const parts = roomName.startsWith('private_') ? roomName.split('_') : null;
+        if (parts) {
+            const user1 = parts[1];
+            const user2 = parts[2];
+            const isLeader = socket.id === currentLeaderId;
+            const isParticipant = socket.username === user1 || socket.username === user2;
+            if (!isParticipant && !isLeader) return;
+        }
+
         let historyToSend = [];
         if (roomName === 'global') {
             historyToSend = globalHistory;
@@ -149,8 +179,21 @@ io.on('connection', (socket) => {
             }
         } else if (roomName && roomName.startsWith('match_')) {
             historyToSend = matchHistory[roomName] || [];
+        } else if (roomName && roomName.startsWith('private_')) {
+            historyToSend = privateChatHistory[roomName] || [];
         }
         socket.emit('loadHistory', historyToSend);
+    });
+
+    socket.on('requestPrivateHistory', (roomID) => {
+        // Security Check
+        const parts = roomID.split('_');
+        const isParticipant = socket.username === parts[1] || socket.username === parts[2];
+        const isLeader = socket.id === currentLeaderId;
+
+        if (isParticipant || isLeader) {
+            socket.emit('loadHistory', privateChatHistory[roomID] || []);
+        }
     });
 
     // Legacy request_history removed as we auto-send on switch.
@@ -190,6 +233,7 @@ io.on('connection', (socket) => {
 
                     io.emit('chat message', sysMsg);
                     io.emit('online users', getOnlineUsernames());
+                    broadcastMutedUsers();
                 } else {
                     socket.emit('chat message', {
                         id: Date.now(),
@@ -232,18 +276,22 @@ io.on('connection', (socket) => {
                     socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You are not the leader.' });
                     return;
                 }
-                const targetId = getTargetSocketId(targetArg);
-                if (targetId) {
-                    mutedUsers.add(targetId);
-                    io.to(targetId).emit('chat message', {
-                        id: Date.now() + Math.random(),
-                        username: 'SYSTEM',
-                        text: 'You have been muted by the leader.',
-                        timestamp: new Date().toLocaleTimeString()
-                    });
-                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `${targetArg} has been muted.` });
+                const targetUsername = targetArg;
+                if (targetUsername) {
+                    mutedUsers.add(targetUsername);
+                    const targetId = getTargetSocketId(targetUsername);
+                    if (targetId) {
+                        io.to(targetId).emit('chat message', {
+                            id: Date.now() + Math.random(),
+                            username: 'SYSTEM',
+                            text: 'You have been muted by the leader.',
+                            timestamp: new Date().toLocaleTimeString()
+                        });
+                    }
+                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `${targetUsername} has been muted.` });
+                    broadcastMutedUsers();
                 } else {
-                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `User ${targetArg} not found.` });
+                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `Please specify a username.` });
                 }
                 return;
             }
@@ -253,18 +301,22 @@ io.on('connection', (socket) => {
                     socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: 'Permission denied: You are not the leader.' });
                     return;
                 }
-                const targetId = getTargetSocketId(targetArg);
-                if (targetId) {
-                    mutedUsers.delete(targetId);
-                    io.to(targetId).emit('chat message', {
-                        id: Date.now() + Math.random(),
-                        username: 'SYSTEM',
-                        text: 'You have been unmuted.',
-                        timestamp: new Date().toLocaleTimeString()
-                    });
-                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `${targetArg} has been unmuted.` });
+                const targetUsername = targetArg;
+                if (targetUsername) {
+                    mutedUsers.delete(targetUsername);
+                    const targetId = getTargetSocketId(targetUsername);
+                    if (targetId) {
+                        io.to(targetId).emit('chat message', {
+                            id: Date.now() + Math.random(),
+                            username: 'SYSTEM',
+                            text: 'You have been unmuted.',
+                            timestamp: new Date().toLocaleTimeString()
+                        });
+                    }
+                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `${targetUsername} has been unmuted.` });
+                    broadcastMutedUsers();
                 } else {
-                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `User ${targetArg} not found.` });
+                    socket.emit('chat message', { id: Date.now(), username: 'SYSTEM', text: `Please specify a username.` });
                 }
                 return;
             }
@@ -423,7 +475,7 @@ io.on('connection', (socket) => {
         }
 
 
-        if (mutedUsers.has(socket.id)) {
+        if (mutedUsers.has(socket.username)) {
             socket.emit('chat message', {
                 id: Date.now(),
                 username: 'SYSTEM',
@@ -441,12 +493,14 @@ io.on('connection', (socket) => {
             avatarUrl: socket.avatarUrl,
             text: text.replace(/warren/i, "Mr. Warren"),
             timestamp: new Date().toLocaleTimeString(),
-            room: room
+            room: room,
+            replyTo: data.replyTo // Support for context menu reply system
         };
 
         // Determine effective room type for history/logic
         const isReport = room === 'report' || room.startsWith('report-');
         const isMatch = room.startsWith('match_');
+        const isPrivate = room.startsWith('private_');
 
         if (isReport) {
             const reportMsg = {
@@ -461,25 +515,7 @@ io.on('connection', (socket) => {
             // Real-time dispatch strictly to room
             io.to(room).emit('chat message', reportMsg);
 
-            // Special logic for Leader visibility if they are not in the room?
-            // User says: "Ensure that if the Leader is in their 'Global' view, they do not see the private match messages"
-            // For reports, we still want Leader to see them if they are the leader, 
-            // but usually we emit to them specifically.
             if (currentLeaderId && currentLeaderId !== socket.id) {
-                // If leader is NOT in the room, they still get a notification?
-                // The current app seems to send it to them.
-                // To keep it strictly room-based, we should ONLY emit to room.
-                // However, the leader role usually sees all reports.
-                // Let's stick to strict room emitting as per "total message isolation".
-                // If the leader wants to see reports, they should join the report room.
-                // Wait, if I change this, I might break existing "Leader sees all reports" feature.
-                // But prompt says: "Leader... do not see the private match messages unless they intentionally switch to the Match room".
-                // "Messages sent in 'Private Match' must only appear in 'Private Match'. Messages sent in 'Global' must only appear in 'Global'."
-                // This implies strictness.
-
-                // Let's keep the special leader notification for reports if they are NOT the sender, 
-                // but only if it's a "Global Leak" we are fixing (match vs global).
-                // Actually, let's just use io.to(room) everywhere.
                 io.to(currentLeaderId).emit('chat message', { ...reportMsg, text: `[BUG REPORT] ${reportMsg.text}` });
             }
         } else if (isMatch) {
@@ -491,11 +527,47 @@ io.on('connection', (socket) => {
             if (matchHistory[room].length > HISTORY_LIMIT) matchHistory[room].shift();
 
             io.to(room).emit('chat message', message);
+        } else if (isPrivate) {
+            // Persistent Private DM History
+            if (!privateChatHistory[room]) {
+                privateChatHistory[room] = [];
+            }
+            privateChatHistory[room].push(message);
+            if (privateChatHistory[room].length > HISTORY_LIMIT) privateChatHistory[room].shift();
+
+            io.to(room).emit('chat message', message);
+
+            // Telegram-Style "Auto-Spawn" for the receiver
+            const parts = room.split('_');
+            const otherUser = parts[1] === socket.username ? parts[2] : parts[1];
+            const targetId = getTargetSocketId(otherUser);
+            if (targetId) {
+                io.to(targetId).emit('incomingPrivateChat', {
+                    from: socket.username,
+                    avatar: socket.avatarUrl,
+                    roomID: room
+                });
+            }
         } else {
             // Global
             globalHistory.push(message);
             if (globalHistory.length > HISTORY_LIMIT) globalHistory.shift();
             io.to('global').emit('chat message', message);
+
+            // @Mention System for Global Chat
+            const mentionRegex = /@(\w+)/g;
+            const mentions = text.match(mentionRegex);
+            if (mentions) {
+                // Get unique usernames mentioned
+                const mentionedUsers = [...new Set(mentions.map(m => m.substring(1)))];
+
+                mentionedUsers.forEach(taggedName => {
+                    const targetId = getTargetSocketId(taggedName);
+                    if (targetId) {
+                        io.to(targetId).emit('userMentioned', { from: username });
+                    }
+                });
+            }
         }
     });
 

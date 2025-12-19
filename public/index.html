@@ -54,6 +54,10 @@
                     </div>
                 </div>
                 <input type="file" id="file-input" accept="image/*,video/*" style="display: none;">
+                <div id="reply-preview" class="reply-preview" style="display: none;">
+                    <span id="reply-text">Replying to...</span>
+                    <button id="cancel-reply">✕</button>
+                </div>
                 <input id="message-input" type="text" placeholder="Type a message..." autocomplete="off">
                 <button id="send-button">Send</button>
 
@@ -73,8 +77,19 @@
     </div>
 
     <div id="context-menu" class="context-menu" style="display: none;">
-        <div id="delete-me" class="context-option">Delete for Me</div>
-        <div id="delete-all" class="context-option">Delete for Everyone</div>
+        <div id="ctx-reply" class="context-item">Reply</div>
+        <div id="ctx-copy" class="context-item">Copy Text</div>
+        <div id="ctx-report" class="context-item">Report User</div>
+        <hr class="context-divider">
+        <div id="ctx-delete-me" class="context-item delete-action" style="display: none;">Delete for me</div>
+        <div id="ctx-delete-all" class="context-item delete-action danger-action" style="display: none;">Delete for all
+        </div>
+        <div id="admin-actions" style="display: none;">
+            <hr class="context-divider">
+            <div id="ctx-kick" class="context-item admin-action">Kick User</div>
+            <div id="ctx-ban" class="context-item admin-action">Ban User</div>
+            <div id="mute-option" class="context-item admin-action">Mute User</div>
+        </div>
     </div>
 
     <div id="match-modal" class="modal-overlay" style="display: none;">

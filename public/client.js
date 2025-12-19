@@ -21,12 +21,21 @@ const closeErrorBtn = document.getElementById('close-error-btn');
 const typingIndicator = document.getElementById('typing-indicator');
 const typingText = document.getElementById('typing-text');
 
+let currentLeaderId = null;
 let username = '';
 let currentRoom = 'global';
 let typingUsers = new Set();
 let typingTimeout;
 let isTyping = false;
 let partnerNames = {}; // roomID -> partnerName
+let unreadCounts = {}; // roomID -> count
+let mutedUsersList = []; // Array of usernames
+
+let selectedMessageId = null;
+
+// Notification Sound (High-end "pop")
+const notificationSound = new Audio('https://raw.githubusercontent.com/rafaelreis-hotmart/Audio-Samples/master/notification.mp3');
+notificationSound.volume = 0.5;
 
 const getFallbackAvatar = (name) => `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&color=fff`;
 
@@ -125,28 +134,209 @@ recipientIndicator.addEventListener('click', () => {
 });
 
 function updateRecipientUI() {
+    // This legacy function for old DM system is now simplified 
+    // since we use persistent rooms.
     if (currentRecipient) {
         recipientIndicator.style.display = 'block';
-        recipientIndicator.innerHTML = `<strong>DM To: ${currentRecipient.username}</strong> <span style="font-size:0.8em; margin-left:10px">(Click to clear)</span>`;
-        messageInput.placeholder = `Message ${currentRecipient.username}...`;
+        recipientIndicator.innerHTML = `<strong>Quick DM To: ${currentRecipient.username}</strong> <span style="font-size:0.8em; margin-left:10px">(Click to clear)</span>`;
     } else {
         recipientIndicator.style.display = 'none';
-        messageInput.placeholder = 'Type a message...';
     }
 }
 
 const contextMenu = document.getElementById('context-menu');
-const deleteMeBtn = document.getElementById('delete-me');
-const deleteAllBtn = document.getElementById('delete-all');
+const contextReply = document.getElementById('ctx-reply');
+const contextCopy = document.getElementById('ctx-copy');
+const contextReport = document.getElementById('ctx-report');
+const adminActions = document.getElementById('admin-actions');
+const contextKick = document.getElementById('ctx-kick');
+const contextBan = document.getElementById('ctx-ban');
 
-let currentLeaderId = null; // Track leader globally
-let selectedMessageId = null; // Track which message was clicked
+const replyPreview = document.getElementById('reply-preview');
+const replyTextDisplay = document.getElementById('reply-text');
+const cancelReplyBtn = document.getElementById('cancel-reply');
 
-// Hide menu on click elsewhere
-// Hide menu on click elsewhere
-// document.addEventListener('click', () => {
-//     contextMenu.style.display = 'none';
-// });
+// New Delete Buttons
+const contextDeleteMe = document.getElementById('ctx-delete-me');
+const contextDeleteAll = document.getElementById('ctx-delete-all');
+const muteOption = document.getElementById('mute-option');
+
+const MUTE_ICON = `<svg class="ctx-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+const UNMUTE_ICON = `<svg class="ctx-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+
+let selectedContextData = null; // Store data for current context menu
+let replyTargetData = null; // Store data for what we are replying to
+
+function showContextMenu(x, y, data) {
+    selectedContextData = data;
+    selectedMessageId = data.id; // Store message ID for deletion
+
+    // Admin Filter
+    adminActions.style.display = data.isAdmin ? 'block' : 'none';
+
+    // User vs Message context adjustment
+    if (data.type === 'user') {
+        contextReply.style.display = 'none';
+        contextCopy.style.display = 'none';
+        contextDeleteMe.style.display = 'none';
+        contextDeleteAll.style.display = 'none';
+    } else {
+        contextReply.style.display = 'block';
+        contextCopy.style.display = 'block';
+
+        // Ownership / Permission Logic for Deletion
+        const isMyMessage = data.user === username;
+        contextDeleteMe.style.display = 'block'; // Always allow local delete for any message
+        contextDeleteAll.style.display = (isMyMessage || data.isAdmin) ? 'block' : 'none';
+
+        // Mute/Unmute Toggle logic
+        if (data.isAdmin) {
+            const targetUsername = data.user;
+            const isMuted = mutedUsersList.includes(targetUsername);
+            if (isMuted) {
+                muteOption.innerHTML = `${UNMUTE_ICON} Unmute User`;
+                muteOption.style.color = '#4ade80'; // Sleek green
+                muteOption.onclick = (e) => {
+                    e.stopPropagation();
+                    unmuteUser(targetUsername);
+                };
+            } else {
+                muteOption.innerHTML = `${MUTE_ICON} Mute User`;
+                muteOption.style.color = '#f87171'; // Sleek red
+                muteOption.onclick = (e) => {
+                    e.stopPropagation();
+                    muteUser(targetUsername);
+                };
+            }
+        }
+    }
+
+    contextMenu.style.display = 'block';
+    contextMenu.style.opacity = '0';
+    contextMenu.style.transform = 'scale(0.95)';
+
+    // Force Reflow
+    void contextMenu.offsetWidth;
+
+    // Edge Detection Logic
+    const menuWidth = contextMenu.offsetWidth || 170;
+    const menuHeight = contextMenu.offsetHeight || 200;
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
+
+    let finalX = x;
+    let finalY = y;
+
+    if (x + menuWidth > screenWidth) {
+        finalX = x - menuWidth;
+    }
+    if (y + menuHeight > screenHeight) {
+        finalY = y - menuHeight;
+    }
+
+    contextMenu.style.left = `${finalX}px`;
+    contextMenu.style.top = `${finalY}px`;
+    contextMenu.style.opacity = '1';
+    contextMenu.style.transform = 'scale(1)';
+}
+
+function hideContextMenu() {
+    contextMenu.style.display = 'none';
+    selectedContextData = null;
+}
+
+// Global listeners for dismissal
+document.addEventListener('click', () => hideContextMenu());
+document.addEventListener('contextmenu', (e) => {
+    // Hide menu if clicking outside of a message or user (where we didn't preventDefault)
+    if (!e.defaultPrevented) hideContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        hideContextMenu();
+        cancelReply();
+    }
+});
+
+// Functional Integration
+contextReply.addEventListener('click', () => {
+    if (!selectedContextData) return;
+    replyTargetData = selectedContextData;
+    replyTextDisplay.textContent = `Replying to ${selectedContextData.user}: "${selectedContextData.text.substring(0, 30)}${selectedContextData.text.length > 30 ? '...' : ''}"`;
+    replyPreview.style.display = 'flex';
+    messageInput.focus();
+});
+
+contextCopy.addEventListener('click', () => {
+    if (!selectedContextData || !selectedContextData.text) return;
+    navigator.clipboard.writeText(selectedContextData.text)
+        .then(() => console.log('Copied to clipboard'))
+        .catch(err => console.error('Copy failed', err));
+});
+
+function cancelReply() {
+    replyPreview.style.display = 'none';
+    replyTargetData = null;
+}
+
+cancelReplyBtn.addEventListener('click', cancelReply);
+
+// Admin Action Redirection
+contextKick.addEventListener('click', () => {
+    if (selectedContextData) socket.emit('chat message', { text: `/kick ${selectedContextData.user}`, room: 'global' });
+});
+contextBan.addEventListener('click', () => {
+    if (selectedContextData) socket.emit('chat message', { text: `/ban ${selectedContextData.user}`, room: 'global' });
+});
+
+// Delete Logic Implementation
+contextDeleteMe.addEventListener('click', () => {
+    if (selectedMessageId) {
+        // Find by ID and remove
+        const msgEl = document.getElementById(`msg-${selectedMessageId}`);
+        if (msgEl) {
+            msgEl.style.opacity = '0';
+            msgEl.style.transform = 'translateX(20px)';
+            setTimeout(() => msgEl.remove(), 200);
+        }
+    }
+    hideContextMenu();
+});
+
+contextDeleteAll.addEventListener('click', () => {
+    if (selectedMessageId) {
+        socket.emit('chat message', { text: `/delete ${selectedMessageId}`, room: currentRoom });
+    }
+    hideContextMenu();
+});
+
+function muteUser(targetUsername) {
+    socket.emit('chat message', { text: `/mute ${targetUsername}`, room: 'global' });
+    hideContextMenu();
+    // Local Leader Feedback
+    renderMessage({
+        id: Date.now(),
+        username: 'SYSTEM',
+        text: `User ${targetUsername} has been muted.`,
+        timestamp: new Date().toLocaleTimeString()
+    });
+}
+
+function unmuteUser(targetUsername) {
+    socket.emit('chat message', { text: `/unmute ${targetUsername}`, room: 'global' });
+    hideContextMenu();
+    // Local Leader Feedback
+    renderMessage({
+        id: Date.now(),
+        username: 'SYSTEM',
+        text: `User ${targetUsername} has been unmuted.`,
+        timestamp: new Date().toLocaleTimeString()
+    });
+}
+
+socket.on('mutedUsersUpdate', (list) => {
+    mutedUsersList = list;
+});
 // MOVED TO BOTTOM to handle both menus
 
 // Helper to escape HTML
@@ -177,6 +367,10 @@ function applyFormatting(text) {
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
     // Italics: *text*
     formatted = formatted.replace(/\*(.*?)\*/g, '<i>$1</i>');
+
+    // @Mention Highlighting
+    formatted = formatted.replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>');
+
     return formatted;
 }
 
@@ -195,28 +389,17 @@ function renderMessage(data, isSelf = false) {
     if (data.id) {
         messageDiv.dataset.id = data.id;
 
-        // Custom Context menu
+        // Custom Context menu (Glassmorphism)
         messageDiv.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            selectedMessageId = data.id;
-
-            // Position menu
-            contextMenu.style.display = 'block';
-            contextMenu.style.left = `${e.clientX}px`;
-            contextMenu.style.top = `${e.clientY}px`;
-
-            // Logic for "Delete for Everyone"
-            const isMyMessage = data.username === username;
-            const isLeader = socket.id === currentLeaderId;
-
-            if (isLeader || isMyMessage) {
-                deleteAllBtn.style.display = 'block';
-            } else {
-                deleteAllBtn.style.display = 'none';
-            }
-
-            // "Delete for Me" is always available
-            deleteMeBtn.style.display = 'block';
+            const isAdmin = socket.id === currentLeaderId;
+            showContextMenu(e.clientX, e.clientY, {
+                type: 'message',
+                id: data.id, // Ensure ID is passed
+                user: data.username,
+                text: data.text,
+                isAdmin: isAdmin
+            });
         });
     }
 
@@ -264,6 +447,16 @@ function renderMessage(data, isSelf = false) {
             usernameSpan.textContent = isSender ? `[DM to ${data.recipient}]` : `[DM from ${data.sender}]`;
         } else {
             usernameSpan.textContent = data.username;
+        }
+
+        messageDiv.appendChild(usernameSpan);
+
+        // Reply Context Rendering
+        if (data.replyTo) {
+            const replyCtxDiv = document.createElement('div');
+            replyCtxDiv.classList.add('message-reply-ctx');
+            replyCtxDiv.innerHTML = `<strong>${data.replyTo.user}</strong>: ${data.replyTo.text.substring(0, 50)}${data.replyTo.text.length > 50 ? '...' : ''}`;
+            messageDiv.appendChild(replyCtxDiv);
         }
 
         const contentSpan = document.createElement('div'); // div for media flexibility
@@ -371,22 +564,6 @@ function renderMessage(data, isSelf = false) {
     window.scrollTo(0, document.body.scrollHeight);
 }
 
-// Menu Actions
-deleteMeBtn.addEventListener('click', () => {
-    if (selectedMessageId) {
-        const el = document.querySelector(`.message[data-id="${selectedMessageId}"]`);
-        if (el) el.remove();
-    }
-    contextMenu.style.display = 'none';
-});
-
-deleteAllBtn.addEventListener('click', () => {
-    if (selectedMessageId) {
-        socket.emit('chat message', { text: '/delete ' + selectedMessageId, room: currentRoom });
-    }
-    contextMenu.style.display = 'none';
-});
-
 
 // Load history (Force Restoration Logic)
 socket.on('loadHistory', (history) => {
@@ -398,8 +575,78 @@ socket.on('loadHistory', (history) => {
 
 // Receive new message
 socket.on('chat message', (msg) => {
+    // ... (rest of the content)
+    const isPrivate = msg.room && msg.room.startsWith('private_');
+
+    // If message is for a different room, handle notification/auto-switch
+    if (msg.room && msg.room !== currentRoom) {
+        // ... (rest of the logic)
+        unreadCounts[msg.room] = (unreadCounts[msg.room] || 0) + 1;
+
+        if (isPrivate) {
+            const parts = msg.room.split('_');
+            const otherUser = parts[1] === username ? parts[2] : parts[1];
+            addPrivateRoomButton(msg.room, otherUser);
+
+            const inGenericRoom = currentRoom === 'global' || currentRoom.startsWith('report-');
+            if (inGenericRoom) {
+                joinRoom(msg.room);
+            }
+        }
+
+        notificationSound.play().catch(err => console.log('Audio play blocked:', err));
+        updateSidebarNotifications(msg.room);
+
+        const btn = document.querySelector(`.room-btn[data-room="${msg.room}"]`);
+        if (btn) {
+            btn.classList.remove('pulse-notice');
+            void btn.offsetWidth;
+            btn.classList.add('pulse-notice');
+            setTimeout(() => btn.classList.remove('pulse-notice'), 2000);
+        }
+
+        return;
+    }
     renderMessage(msg);
 });
+
+// @Mention Notification Logic
+socket.on('userMentioned', (data) => {
+    notificationSound.play().catch(err => console.log('Audio play blocked:', err));
+
+    const globalBtn = document.getElementById('room-global');
+    if (globalBtn) {
+        globalBtn.classList.remove('mention-glow');
+        void globalBtn.offsetWidth; // Trigger reflow
+        globalBtn.classList.add('mention-glow');
+        setTimeout(() => globalBtn.classList.remove('mention-glow'), 1500);
+    }
+});
+
+function updateSidebarNotifications(roomID) {
+    if (!roomID) return; // Null safety
+    const count = unreadCounts[roomID] || 0;
+
+    // Find the button (static or dynamic)
+    let btn = null;
+    if (roomID === 'global') btn = document.getElementById('room-global');
+    else if (roomID.startsWith('report-')) btn = document.getElementById('room-report');
+    else btn = document.querySelector(`.room-btn[data-room="${roomID}"]`);
+
+    if (btn) {
+        let badge = btn.querySelector('.notification-dot');
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'notification-dot';
+                btn.appendChild(badge);
+            }
+            badge.textContent = count > 99 ? '99+' : count;
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+}
 
 // Receive message delete event
 socket.on('delete message', (id) => {
@@ -504,41 +751,146 @@ socket.on('online users', (data) => {
             nameSpan.textContent += " (You)";
             li.style.fontStyle = 'italic';
             li.style.color = '#888';
+
+            const dmIcon = document.createElement('span');
+            dmIcon.className = 'dm-icon-hidden';
+            li.appendChild(dmIcon);
+
         } else {
             li.style.cursor = 'pointer';
             li.title = `Click to DM ${user.username}`;
+
+            // Add Message Button (Telegram Style)
+            const msgBtn = document.createElement('button');
+            msgBtn.innerHTML = '💬';
+            msgBtn.className = 'msg-btn';
+            msgBtn.title = 'Message';
+
+            msgBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Avoid triggering li click
+                openPrivateChat(user.username, user.avatarUrl || fallback);
+            });
+
+            li.appendChild(msgBtn);
+
             li.addEventListener('click', () => {
-                currentRecipient = user;
-                updateRecipientUI();
-                // Focus input
-                messageInput.focus();
+                openPrivateChat(user.username, user.avatarUrl || fallback);
+            });
+
+            // User Context Menu
+            li.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const isAdmin = socket.id === currentLeaderId;
+                showContextMenu(e.clientX, e.clientY, {
+                    type: 'user',
+                    user: user.username,
+                    isAdmin: isAdmin
+                });
             });
         }
         userList.appendChild(li);
     });
 });
 
+let activePrivateRooms = new Set();
+
+function getPrivateRoomId(u1, u2) {
+    return 'private_' + [u1, u2].sort().join('_');
+}
+
+function openPrivateChat(targetUser, targetAvatar) {
+    const roomID = getPrivateRoomId(username, targetUser);
+
+    // UI Swap: Ensure sidebar button exists
+    if (!activePrivateRooms.has(roomID)) {
+        addPrivateRoomButton(roomID, targetUser);
+    }
+
+    // Instant Switch
+    joinRoom(roomID);
+
+    // Explicit History Request (Telegram Speed)
+    socket.emit('requestPrivateHistory', roomID);
+}
+
+// Receiver-Side Auto-Spawn
+socket.on('incomingPrivateChat', (data) => {
+    // If receiver is in Global, force-switch instantly
+    if (currentRoom === 'global') {
+        openPrivateChat(data.from, data.avatar);
+    } else {
+        // If busy in another DM, just show notification
+        unreadCounts[data.roomID] = (unreadCounts[data.roomID] || 0) + 1;
+        updateSidebarNotifications(data.roomID);
+
+        // Ensure sidebar button exists for the notification
+        if (!activePrivateRooms.has(data.roomID)) {
+            addPrivateRoomButton(data.roomID, data.from);
+        }
+    }
+});
+
+function addPrivateRoomButton(roomID, targetUser) {
+    const sidebar = document.getElementById('sidebar');
+    let btn = document.querySelector(`.room-btn[data-room="${roomID}"]`);
+
+    if (btn) {
+        // Prioritization: Move existing button to the top of private section
+        // Insert after roomReportBtn
+        if (roomReportBtn && roomReportBtn.nextSibling !== btn) {
+            roomReportBtn.parentNode.insertBefore(btn, roomReportBtn.nextSibling);
+        }
+    } else {
+        activePrivateRooms.add(roomID);
+
+        btn = document.createElement('button');
+        btn.className = 'room-btn';
+        btn.dataset.room = roomID;
+        btn.innerHTML = `👤 ${targetUser}`;
+        btn.addEventListener('click', () => {
+            joinRoom(roomID);
+        });
+
+        // Insert after Report button (top of private list)
+        if (roomReportBtn && roomReportBtn.parentNode) {
+            roomReportBtn.parentNode.insertBefore(btn, roomReportBtn.nextSibling);
+        } else {
+            sidebar.appendChild(btn);
+        }
+    }
+
+    // Pulse effect for new/re-activated button
+    btn.classList.add('pulse-notice');
+    setTimeout(() => btn.classList.remove('pulse-notice'), 2000);
+
+    // If there were already unread messages for this room, update UI
+    if (unreadCounts[roomID]) {
+        updateSidebarNotifications(roomID);
+    }
+}
+
 // Send message
 function sendMessage() {
     const text = messageInput.value.trim();
     if (text) {
-        if (currentRecipient) {
-            // Send Private
-            socket.emit('private message', {
-                to: currentRecipient.id,
-                toUsername: currentRecipient.username,
-                text: text
-            });
-        } else {
-            // Send with room context to prevent global leaks
-            socket.emit('chat message', {
-                text: text,
-                room: currentRoom,
-                sender: username
-            });
+        const messageData = {
+            text: text,
+            room: currentRoom,
+            sender: username
+        };
+
+        if (replyTargetData) {
+            messageData.replyTo = {
+                user: replyTargetData.user,
+                text: replyTargetData.text
+            };
         }
+
+        socket.emit('chat message', messageData);
+
         messageInput.value = '';
         messageInput.focus();
+        cancelReply();
     }
 }
 
@@ -782,15 +1134,17 @@ function setActiveRoom(roomID) {
     allButtons.forEach(btn => btn.classList.remove('active-room', 'active'));
 
     // Find the button for this room
-    let targetId = roomID;
-    if (roomID === 'global') targetId = 'room-global';
-    else if (roomID.startsWith('report-')) targetId = 'room-report';
-    else if (roomID.startsWith('match_')) targetId = 'room-match';
+    let targetBtn = null;
+    if (roomID === 'global') targetBtn = document.getElementById('room-global');
+    else if (roomID.startsWith('report-')) targetBtn = document.getElementById('room-report');
+    else if (roomID.startsWith('match_')) targetBtn = document.getElementById('room-match');
+    else {
+        // Find dynamic private button
+        targetBtn = document.querySelector(`.room-btn[data-room="${roomID}"]`);
+    }
 
-    const targetBtn = document.getElementById(targetId);
     if (targetBtn) {
         targetBtn.classList.add('active-room');
-        // Backward compatibility if some styles use .active
         targetBtn.classList.add('active');
     }
 }
@@ -800,26 +1154,54 @@ const roomGlobalBtn = document.getElementById('room-global');
 const roomReportBtn = document.getElementById('room-report');
 
 function joinRoom(room) {
+    if (!room) return; // Null safety
     currentRoom = room;
+
+    // Reset unread count for this room
+    unreadCounts[room] = 0;
+    updateSidebarNotifications(room);
+
+    // Dynamic Header Overhaul
+    const header = document.getElementById('room-name-display');
+    if (room.startsWith('private_')) {
+        const parts = room.split('_');
+        const otherUser = parts[1] === username ? parts[2] : parts[1];
+
+        // Find user object from list for avatar (simple lookup)
+        const userElements = Array.from(userList.querySelectorAll('li'));
+        const userEl = userElements.find(el => {
+            const span = el.querySelector('span');
+            return span && span.textContent.includes(otherUser);
+        });
+        const avatarSrc = userEl ? userEl.querySelector('img').src : getFallbackAvatar(otherUser);
+
+        header.innerHTML = `
+            <div id="chat-header-context" style="display: flex; align-items: center; gap: 12px;">
+                <img id="chat-header-img" src="${avatarSrc}" style="width: 38px; height: 38px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(106, 17, 203, 0.2);">
+                <span id="chat-header-name" style="font-weight: 700; font-size: 1.1rem; color: #1a1a1a;">${otherUser}</span>
+            </div>
+        `;
+    } else if (room === 'global') {
+        header.textContent = '🌐 Global Chat';
+    } else if (room.startsWith('report-')) {
+        header.textContent = `🚨 Report: ${room.split('-')[1]}`;
+    } else if (room.startsWith('match_')) {
+        const name = partnerNames[room] || 'Private Match';
+        header.textContent = `🤝 Match: ${name}`;
+    } else {
+        header.textContent = room;
+    }
 
     // UI Feedback
     setActiveRoom(room);
 
-    // Trigger Server Switch
+    // Server Switch
     socket.emit('switchRoom', room);
-    socket.emit('getHistory', room);
 
-    // Reliable History Loading: Clear window
     messagesArea.innerHTML = '';
 
-    if (room === 'global') {
-        roomNameDisplay.textContent = 'Global Chat Room';
-    } else if (room.startsWith('report-')) {
-        roomNameDisplay.textContent = 'Bug Report (Private)';
-    } else if (room.startsWith('match_')) {
-        const name = partnerNames[room] || 'Private Match';
-        roomNameDisplay.textContent = `Chat with ${name}`;
-    }
+    // Auto-focus input
+    if (messageInput) messageInput.focus();
 }
 
 roomGlobalBtn.addEventListener('click', () => {
