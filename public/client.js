@@ -23,6 +23,7 @@ const typingText = document.getElementById('typing-text');
 
 let currentLeaderId = null;
 let username = '';
+let myID = null; // Captured on connect
 let currentRoom = 'global';
 let typingUsers = new Set();
 let typingTimeout;
@@ -99,6 +100,11 @@ joinButton.addEventListener('click', () => {
 });
 
 // Handle Login Errors from Server
+socket.on('connect', () => {
+    myID = socket.id;
+    console.log('Connected with ID:', myID);
+});
+
 socket.on('loginError', ({ title, message }) => {
     showError(title, message);
 });
@@ -185,7 +191,7 @@ function showContextMenu(x, y, data) {
         contextCopy.style.display = 'block';
 
         // Ownership / Permission Logic for Deletion
-        const isMyMessage = data.user === username;
+        const isMyMessage = data.senderID === myID;
         contextDeleteMe.style.display = 'block'; // Always allow local delete for any message
         contextDeleteAll.style.display = (isMyMessage || data.isAdmin) ? 'block' : 'none';
 
@@ -397,6 +403,7 @@ function renderMessage(data, isSelf = false) {
                 type: 'message',
                 id: data.id, // Ensure ID is passed
                 user: data.username,
+                senderID: data.senderID,
                 text: data.text,
                 isAdmin: isAdmin
             });
@@ -437,16 +444,17 @@ function renderMessage(data, isSelf = false) {
             messageDiv.style.border = '2px solid #ff9800';
         }
 
-        const isMe = data.username === username; // or data.sender for private
+        const isMe = data.senderID === myID;
         messageDiv.classList.add(isMe ? 'self' : 'other');
 
         const usernameSpan = document.createElement('span');
         usernameSpan.classList.add('username');
         if (data.isPrivate) {
-            const isSender = data.sender === username;
+            const isSender = data.senderID === myID;
             usernameSpan.textContent = isSender ? `[DM to ${data.recipient}]` : `[DM from ${data.sender}]`;
         } else {
-            usernameSpan.textContent = data.username;
+            const isMe = data.senderID === myID;
+            usernameSpan.textContent = isMe ? `${data.username} (you)` : data.username;
         }
 
         messageDiv.appendChild(usernameSpan);

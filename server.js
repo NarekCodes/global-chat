@@ -79,6 +79,17 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Username Uniqueness Check
+        const { users } = getOnlineUsernames();
+        const isTaken = users.some(u => u.username.toLowerCase() === username.toLowerCase());
+        if (isTaken) {
+            socket.emit('loginError', {
+                title: 'Name Already Active',
+                message: `The name "${username}" is already in use. Please choose a different name.`
+            });
+            return;
+        }
+
         // Server Guard 2: Avatar URL Regex (if provided and not fallback)
         if (avatarUrl && !avatarUrl.includes('ui-avatars.com')) {
             const imageRegex = /\.(jpg|jpeg|png|webp|gif|svg)$/i;
@@ -102,7 +113,8 @@ io.on('connection', (socket) => {
         const systemMessage = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
             username: 'SYSTEM',
-            text: `${username} has joined the chat`
+            text: `${username} has joined the chat`,
+            senderID: 'SYSTEM'
         };
         // Add to history
         globalHistory.push(systemMessage);
@@ -330,7 +342,7 @@ io.on('connection', (socket) => {
                     if (idx !== -1) {
                         const msg = historyArr[idx];
                         const isLeader = socket.id === currentLeaderId;
-                        const isAuthor = msg.username === socket.username;
+                        const isAuthor = msg.senderID === socket.id;
 
                         if (isLeader || isAuthor) {
                             historyArr.splice(idx, 1);
@@ -490,6 +502,7 @@ io.on('connection', (socket) => {
         const message = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
             username: username,
+            senderID: socket.id, // Unique identity based on socket
             avatarUrl: socket.avatarUrl,
             text: text.replace(/warren/i, "Mr. Warren"),
             timestamp: new Date().toLocaleTimeString(),
