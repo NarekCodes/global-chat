@@ -42,6 +42,49 @@ body {
     padding: 20px;
     border-bottom: 1px solid #ddd;
     text-align: center;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chat-header h1 {
+    margin: 0;
+    flex: 1;
+}
+
+/* Timer Display */
+.timer-display {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    animation: pulse 1s infinite;
+}
+
+.timer-display .timer-urgent {
+    background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+    color: white;
+    animation: urgentPulse 0.5s infinite;
+}
+
+@keyframes urgentPulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
+}
+
+/* Voted Indicator */
+.voted-indicator {
+    color: #22c55e;
+    font-size: 0.9em;
 }
 
 .chat-header h1 {
@@ -68,6 +111,40 @@ body {
     word-wrap: break-word;
     position: relative;
     animation: fadeIn 0.3s ease;
+}
+
+/* Message with Avatar - Flexbox Layout */
+.message-with-avatar {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.message-with-avatar .message-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.message-with-avatar .message-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+}
+
+.message-with-avatar .message-username {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #333;
+}
+
+.message-with-avatar .message-text {
+    font-size: 0.95rem;
+    color: #050505;
+    word-wrap: break-word;
 }
 
 @keyframes fadeIn {
@@ -541,6 +618,18 @@ body {
 .phase-day1 {
     background: linear-gradient(135deg, #fbbf24, #f59e0b);
     color: #1e1b4b;
+}
+
+/* Spectator Styling */
+.player-item.spectator {
+    opacity: 0.6;
+    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+    border-left: 4px solid #9ca3af;
+}
+
+.player-item.spectator .player-name {
+    color: #6b7280;
+    font-style: italic;
 }
 
 /* Mafia Secret Message */

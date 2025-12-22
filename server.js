@@ -10,11 +10,12 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
-// DUAL-MODE: Chat + Mafia Game Engine (Final Version)
+// DUAL-MODE: Chat + Mafia Engine (Final Comprehensive Version)
 // ============================================================
 
 const activeRooms = {};
 const HISTORY_LIMIT = 200;
+const DAY_TIMER_SECONDS = 60;
 
 const ROLES = {
     DON: 'Don',
@@ -70,7 +71,9 @@ const getRoomUsers = (roomCode, forSocketId = null) => {
             avatarUrl: memberData.avatarUrl,
             isAlive: memberData.isAlive !== false,
             isLeader: socketId === room.leaderId,
-            isMuted: room.mutedUsers?.has(memberData.username)
+            isMuted: room.mutedUsers?.has(memberData.username),
+            hasVoted: memberData.hasVoted || false,
+            isSpectator: memberData.isSpectator || false
         };
 
         if (room.isMafiaRoom && isSheriff && sheriffDiscoveries.has(memberData.username)) {
@@ -119,7 +122,7 @@ const getMafiaTeam = (roomCode) => {
     if (!room) return [];
     const mafia = [];
     for (const [socketId, memberData] of room.members) {
-        if ((memberData.role === ROLES.DON || memberData.role === ROLES.MAFIA) && memberData.isAlive) {
+        if ((memberData.role === ROLES.DON || memberData.role === ROLES.MAFIA) && memberData.isAlive && !memberData.isSpectator) {
             mafia.push({ socketId, ...memberData });
         }
     }
@@ -131,7 +134,7 @@ const getTownTeam = (roomCode) => {
     if (!room) return [];
     const town = [];
     for (const [socketId, memberData] of room.members) {
-        if ((memberData.role === ROLES.SHERIFF || memberData.role === ROLES.VILLAGER) && memberData.isAlive) {
+        if ((memberData.role === ROLES.SHERIFF || memberData.role === ROLES.VILLAGER) && memberData.isAlive && !memberData.isSpectator) {
             town.push({ socketId, ...memberData });
         }
     }
@@ -141,7 +144,13 @@ const getTownTeam = (roomCode) => {
 const getAliveCount = (roomCode) => {
     const room = activeRooms[roomCode];
     if (!room) return 0;
-    return [...room.members.values()].filter(m => m.isAlive).length;
+    return [...room.members.values()].filter(m => m.isAlive && !m.isSpectator).length;
+};
+
+const getVotedCount = (roomCode) => {
+    const room = activeRooms[roomCode];
+    if (!room) return 0;
+    return [...room.members.values()].filter(m => m.isAlive && !m.isSpectator && m.hasVoted).length;
 };
 
 const checkVictory = (roomCode) => {
@@ -174,6 +183,91 @@ const eliminatePlayer = (roomCode, targetUsername, reason) => {
 };
 
 // ============================================================
+// TIMER SYSTEM
+// ============================================================
+
+const clearRoomTimer = (roomCode) => {
+    const room = activeRooms[roomCode];
+    if (!room || !room.timerInterval) return;
+    clearInterval(room.timerInterval);
+    room.timerInterval = null;
+    room.timerSeconds = 0;
+    io.to(roomCode).emit('timer_update', { seconds: 0, active: false });
+};
+
+const startDayTimer = (roomCode, isDay1 = false) => {
+    const room = activeRooms[roomCode];
+    if (!room || !room.isMafiaRoom) return;
+
+    clearRoomTimer(roomCode);
+    room.timerSeconds = DAY_TIMER_SECONDS;
+
+    io.to(roomCode).emit('timer_update', { seconds: room.timerSeconds, active: true });
+
+    room.timerInterval = setInterval(() => {
+        room.timerSeconds--;
+        io.to(roomCode).emit('timer_update', { seconds: room.timerSeconds, active: true });
+
+        if (room.timerSeconds <= 0) {
+            clearRoomTimer(roomCode);
+            if (isDay1) {
+                room.round++;
+                startNightPhase(roomCode);
+            } else {
+                resolveVoting(roomCode);
+            }
+        }
+    }, 1000);
+};
+
+const resolveVoting = (roomCode) => {
+    const room = activeRooms[roomCode];
+    if (!room) return;
+
+    clearRoomTimer(roomCode);
+
+    const skipCount = room.skipVotes?.size || 0;
+    let maxVotes = skipCount;
+    let maxTarget = null;
+    let hasTie = false;
+
+    for (const [target, count] of (room.votes || new Map())) {
+        if (count > maxVotes) {
+            maxVotes = count;
+            maxTarget = target;
+            hasTie = false;
+        } else if (count === maxVotes && count > 0) {
+            hasTie = true;
+        }
+    }
+
+    if (hasTie || maxTarget === null || skipCount >= maxVotes) {
+        const skipMsg = createSystemMessage(`🚫 Day ended with no elimination.`, 'phase');
+        room.history.push(skipMsg);
+        io.to(roomCode).emit('chat message', skipMsg);
+    } else {
+        eliminatePlayer(roomCode, maxTarget, 'Voted out.');
+        const victory = checkVictory(roomCode);
+        if (victory) { endGame(roomCode, victory); return; }
+    }
+
+    room.round++;
+    setTimeout(() => startNightPhase(roomCode), 2000);
+};
+
+const checkInstantResolution = (roomCode) => {
+    const room = activeRooms[roomCode];
+    if (!room || room.gameState !== 'DAY') return;
+
+    const aliveCount = getAliveCount(roomCode);
+    const votedCount = getVotedCount(roomCode);
+
+    if (votedCount >= aliveCount && aliveCount > 0) {
+        resolveVoting(roomCode);
+    }
+};
+
+// ============================================================
 // MAFIA GAME PHASES
 // ============================================================
 
@@ -181,15 +275,16 @@ const startNightPhase = (roomCode) => {
     const room = activeRooms[roomCode];
     if (!room || !room.isMafiaRoom) return;
 
+    clearRoomTimer(roomCode);
     room.gameState = 'NIGHT';
     room.nightActions = { mafiaKill: null, donActed: false, sheriffActed: false };
+    room.mafiaChat = []; // Fresh Mafia chat each night
 
     const msg = createSystemMessage(`🌙 Night ${room.round} falls. Town sleeps...`, 'phase');
     room.history.push(msg);
     io.to(roomCode).emit('chat message', msg);
     io.to(roomCode).emit('phaseChange', { phase: 'NIGHT', round: room.round });
 
-    // Notify players of their night actions
     const mafia = getMafiaTeam(roomCode);
     mafia.forEach(m => {
         const s = io.sockets.sockets.get(m.socketId);
@@ -200,7 +295,7 @@ const startNightPhase = (roomCode) => {
     });
 
     for (const [socketId, memberData] of room.members) {
-        if (memberData.role === ROLES.SHERIFF && memberData.isAlive) {
+        if (memberData.role === ROLES.SHERIFF && memberData.isAlive && !memberData.isSpectator) {
             const s = io.sockets.sockets.get(socketId);
             if (s) s.emit('chat message', createSystemMessage('/investigate [name]', 'private'));
         }
@@ -212,9 +307,8 @@ const checkNightComplete = (roomCode) => {
     const room = activeRooms[roomCode];
     if (!room || room.gameState !== 'NIGHT') return;
 
-    // Wait for BOTH Don AND Sheriff to act
-    const sheriffAlive = [...room.members.values()].some(m => m.role === ROLES.SHERIFF && m.isAlive);
-    const donAlive = [...room.members.values()].some(m => m.role === ROLES.DON && m.isAlive);
+    const sheriffAlive = [...room.members.values()].some(m => m.role === ROLES.SHERIFF && m.isAlive && !m.isSpectator);
+    const donAlive = [...room.members.values()].some(m => m.role === ROLES.DON && m.isAlive && !m.isSpectator);
 
     const donReady = !donAlive || room.nightActions.donActed;
     const sheriffReady = !sheriffAlive || room.nightActions.sheriffActed;
@@ -231,16 +325,23 @@ const startDay1Phase = (roomCode) => {
     room.gameState = 'DAY_1';
     room.round = 1;
 
-    const msg = createSystemMessage(`☀️ Day 1. Introductions only. No voting or skipping allowed.`, 'phase');
+    const msg = createSystemMessage(`☀️ Day 1. Introductions only. No voting. (60s)`, 'phase');
     room.history.push(msg);
     io.to(roomCode).emit('chat message', msg);
     io.to(roomCode).emit('phaseChange', { phase: 'DAY_1', round: 1 });
+
+    startDayTimer(roomCode, true);
     broadcastRoomUsers(roomCode);
 };
 
 const startDayPhase = (roomCode) => {
     const room = activeRooms[roomCode];
     if (!room || !room.isMafiaRoom) return;
+
+    clearRoomTimer(roomCode);
+
+    // Clear Mafia secret chat (privacy reset)
+    room.mafiaChat = [];
 
     // Morning Report
     if (room.nightActions?.mafiaKill) {
@@ -250,7 +351,7 @@ const startDayPhase = (roomCode) => {
         io.to(roomCode).emit('chat message', morningMsg);
         eliminatePlayer(roomCode, victim, '');
     } else {
-        const peacefulMsg = createSystemMessage(`☀️ Morning has broken. No one died last night.`, 'phase');
+        const peacefulMsg = createSystemMessage(`☀️ Morning has broken. No one died.`, 'phase');
         room.history.push(peacefulMsg);
         io.to(roomCode).emit('chat message', peacefulMsg);
     }
@@ -264,15 +365,19 @@ const startDayPhase = (roomCode) => {
     room.skipVotes = new Set();
 
     for (const [socketId, memberData] of room.members) {
-        memberData.hasVoted = false;
-        memberData.votedFor = null;
-        room.members.set(socketId, memberData);
+        if (!memberData.isSpectator) {
+            memberData.hasVoted = false;
+            memberData.votedFor = null;
+            room.members.set(socketId, memberData);
+        }
     }
 
-    const dayMsg = createSystemMessage(`Day ${room.round}. Use /vote [name] or /skip to end without elimination.`, 'phase');
+    const dayMsg = createSystemMessage(`Day ${room.round}. Vote /vote [name] or /skip. (60s)`, 'phase');
     room.history.push(dayMsg);
     io.to(roomCode).emit('chat message', dayMsg);
     io.to(roomCode).emit('phaseChange', { phase: 'DAY', round: room.round });
+
+    startDayTimer(roomCode, false);
     broadcastRoomUsers(roomCode);
 };
 
@@ -280,7 +385,10 @@ const endGame = (roomCode, victory) => {
     const room = activeRooms[roomCode];
     if (!room) return;
 
+    clearRoomTimer(roomCode);
     room.gameState = 'LOBBY';
+    room.mafiaChat = [];
+
     const msg = createSystemMessage(victory.message, 'victory');
     room.history.push(msg);
     io.to(roomCode).emit('chat message', msg);
@@ -290,6 +398,7 @@ const endGame = (roomCode, victory) => {
         memberData.role = null;
         memberData.isAlive = true;
         memberData.hasVoted = false;
+        memberData.isSpectator = false;
         room.members.set(socketId, memberData);
     }
     room.sheriffDiscoveries = new Map();
@@ -300,18 +409,18 @@ const assignRoles = (roomCode) => {
     const room = activeRooms[roomCode];
     if (!room) return;
 
-    const members = [...room.members.entries()];
-    const count = members.length;
+    const activePlayers = [...room.members.entries()].filter(([, m]) => !m.isSpectator);
+    const count = activePlayers.length;
     const mafiaCount = Math.max(1, Math.floor(count * 0.25));
 
-    for (let i = members.length - 1; i > 0; i--) {
+    for (let i = activePlayers.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [members[i], members[j]] = [members[j], members[i]];
+        [activePlayers[i], activePlayers[j]] = [activePlayers[j], activePlayers[i]];
     }
 
     let mafiaAssigned = 0, sheriffAssigned = false;
 
-    members.forEach(([socketId, memberData]) => {
+    activePlayers.forEach(([socketId, memberData]) => {
         let role;
         if (mafiaAssigned < mafiaCount) {
             role = mafiaAssigned === 0 ? ROLES.DON : ROLES.MAFIA;
@@ -325,6 +434,7 @@ const assignRoles = (roomCode) => {
 
         memberData.role = role;
         memberData.isAlive = true;
+        memberData.hasVoted = false;
         room.members.set(socketId, memberData);
 
         const s = io.sockets.sockets.get(socketId);
@@ -341,43 +451,13 @@ const assignRoles = (roomCode) => {
     });
 
     room.sheriffDiscoveries = new Map();
+    room.mafiaChat = [];
+
     const startMsg = createSystemMessage(`🎮 Game started! ${count} players.`, 'game');
     room.history.push(startMsg);
     io.to(roomCode).emit('chat message', startMsg);
 
     setTimeout(() => startDay1Phase(roomCode), 2000);
-};
-
-const checkDayEnd = (roomCode) => {
-    const room = activeRooms[roomCode];
-    if (!room || room.gameState !== 'DAY') return;
-
-    const aliveCount = getAliveCount(roomCode);
-    const majority = Math.floor(aliveCount / 2) + 1;
-    const skipCount = room.skipVotes.size;
-
-    // Check if skip has majority
-    if (skipCount >= majority) {
-        const skipMsg = createSystemMessage(`🚫 Majority voted to skip. No elimination.`, 'phase');
-        room.history.push(skipMsg);
-        io.to(roomCode).emit('chat message', skipMsg);
-        room.round++;
-        setTimeout(() => startNightPhase(roomCode), 2000);
-        return true;
-    }
-
-    // Check if any player has majority votes
-    for (const [target, count] of room.votes) {
-        if (count >= majority) {
-            eliminatePlayer(roomCode, target, 'Voted out.');
-            const victory = checkVictory(roomCode);
-            if (victory) { endGame(roomCode, victory); return true; }
-            setTimeout(() => startNightPhase(roomCode), 2000);
-            return true;
-        }
-    }
-
-    return false;
 };
 
 // ============================================================
@@ -402,7 +482,7 @@ io.on('connection', (socket) => {
 
         activeRooms[roomCode] = {
             history: [],
-            members: new Map([[socket.id, { username, avatarUrl: socket.avatarUrl, isAlive: true }]]),
+            members: new Map([[socket.id, { username, avatarUrl: socket.avatarUrl, isAlive: true, hasVoted: false, isSpectator: false }]]),
             leaderId: socket.id,
             mutedUsers: new Set(),
             isPermanent: false,
@@ -441,7 +521,10 @@ io.on('connection', (socket) => {
                 sheriffDiscoveries: new Map(),
                 votes: new Map(),
                 skipVotes: new Set(),
-                round: 0
+                mafiaChat: [],
+                round: 0,
+                timerInterval: null,
+                timerSeconds: 0
             };
         }
 
@@ -451,11 +534,6 @@ io.on('connection', (socket) => {
         }
 
         const room = activeRooms[roomCode];
-
-        if (room.isMafiaRoom && room.gameState !== 'LOBBY') {
-            socket.emit('loginError', { title: 'Game In Progress', message: 'Wait for next game.' });
-            return;
-        }
 
         for (const [, m] of room.members) {
             if (m.username.toLowerCase() === username.toLowerCase()) {
@@ -468,16 +546,39 @@ io.on('connection', (socket) => {
         socket.avatarUrl = avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=random&color=fff`;
         socket.roomCode = roomCode;
 
-        room.members.set(socket.id, { username, avatarUrl: socket.avatarUrl, isAlive: true });
+        // Spectator logic: if game is in progress
+        const isSpectator = room.isMafiaRoom && room.gameState !== 'LOBBY';
+
+        room.members.set(socket.id, {
+            username,
+            avatarUrl: socket.avatarUrl,
+            isAlive: !isSpectator,
+            hasVoted: false,
+            isSpectator
+        });
+
         if (!room.leaderId) room.leaderId = socket.id;
 
         socket.join(roomCode);
-        const msg = createSystemMessage(`${username} joined.`);
-        room.history.push(msg);
-        io.to(roomCode).emit('chat message', msg);
 
-        socket.emit('roomJoined', { roomCode, isLeader: socket.id === room.leaderId, isMafiaRoom: room.isMafiaRoom });
+        const joinMsg = isSpectator
+            ? createSystemMessage(`👁️ ${username} joined as a Spectator.`)
+            : createSystemMessage(`${username} joined.`);
+        room.history.push(joinMsg);
+        io.to(roomCode).emit('chat message', joinMsg);
+
+        socket.emit('roomJoined', {
+            roomCode,
+            isLeader: socket.id === room.leaderId,
+            isMafiaRoom: room.isMafiaRoom,
+            isSpectator
+        });
         socket.emit('loadHistory', room.history);
+
+        if (isSpectator) {
+            socket.emit('chat message', createSystemMessage('You are a Spectator. Watch only.', 'private'));
+        }
+
         broadcastRoomUsers(roomCode);
     });
 
@@ -501,7 +602,13 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (room.isMafiaRoom && !member.isAlive) {
+        // Spectators can only chat during LOBBY
+        if (room.isMafiaRoom && member.isSpectator && room.gameState !== 'LOBBY') {
+            socket.emit('chat message', createSystemMessage('Spectators cannot chat during game.', 'error'));
+            return;
+        }
+
+        if (room.isMafiaRoom && !member.isAlive && !member.isSpectator) {
             socket.emit('chat message', createSystemMessage('Dead cannot speak.', 'error'));
             return;
         }
@@ -512,6 +619,7 @@ io.on('connection', (socket) => {
                 return;
             }
 
+            // Mafia secret chat
             const message = {
                 id: Date.now() + Math.random().toString(36).substr(2, 9),
                 username: `🔪 ${member.username}`,
@@ -519,6 +627,7 @@ io.on('connection', (socket) => {
                 text, timestamp: new Date().toLocaleTimeString(),
                 isSecret: true
             };
+            room.mafiaChat.push(message);
             getMafiaTeam(roomCode).forEach(m => {
                 const s = io.sockets.sockets.get(m.socketId);
                 if (s) s.emit('chat message', message);
@@ -549,14 +658,18 @@ io.on('connection', (socket) => {
         const member = room.members.get(socket.id);
         const username = member?.username || 'Unknown';
 
-        if (room.isMafiaRoom && room.gameState !== 'LOBBY' && member?.isAlive) {
+        if (room.isMafiaRoom && room.gameState !== 'LOBBY' && member?.isAlive && !member?.isSpectator) {
             member.isAlive = false;
             const deathMsg = createSystemMessage(`💀 ${username} disconnected (suicide).`, 'death');
             room.history.push(deathMsg);
             io.to(roomCode).emit('chat message', deathMsg);
 
             const victory = checkVictory(roomCode);
-            if (victory) endGame(roomCode, victory);
+            if (victory) { endGame(roomCode, victory); return; }
+
+            if (room.gameState === 'DAY') {
+                checkInstantResolution(roomCode);
+            }
         }
 
         room.members.delete(socket.id);
@@ -568,6 +681,7 @@ io.on('connection', (socket) => {
         }
 
         if (room.members.size === 0 && !room.isPermanent) {
+            clearRoomTimer(roomCode);
             delete activeRooms[roomCode];
             return;
         }
@@ -627,16 +741,22 @@ function handleCommand(socket, room, roomCode, member, text) {
         return;
     }
 
-    // MAFIA-ONLY COMMANDS
+    // MAFIA-ONLY
     if (!room.isMafiaRoom) {
         socket.emit('chat message', createSystemMessage('This is a chat room, not a game lobby.', 'error'));
+        return;
+    }
+
+    // Spectators cannot use game commands
+    if (member.isSpectator) {
+        socket.emit('chat message', createSystemMessage('Spectators cannot use game commands.', 'error'));
         return;
     }
 
     if (command === '/start') {
         if (!isLeader) { socket.emit('chat message', createSystemMessage('Only Leader.', 'error')); return; }
         if (room.gameState !== 'LOBBY') { socket.emit('chat message', createSystemMessage('Game running.', 'error')); return; }
-        const count = room.members.size;
+        const count = [...room.members.values()].filter(m => !m.isSpectator).length;
         if (count < 5 || count > 20) { socket.emit('chat message', createSystemMessage('Need 5-20 players.', 'error')); return; }
         assignRoles(roomCode);
         return;
@@ -645,6 +765,7 @@ function handleCommand(socket, room, roomCode, member, text) {
     if (command === '/endday') {
         if (!isLeader) { socket.emit('chat message', createSystemMessage('Only Leader.', 'error')); return; }
         if (room.gameState !== 'DAY_1') { socket.emit('chat message', createSystemMessage('Only Day 1.', 'error')); return; }
+        clearRoomTimer(roomCode);
         room.round++;
         startNightPhase(roomCode);
         return;
@@ -656,7 +777,7 @@ function handleCommand(socket, room, roomCode, member, text) {
         if (room.nightActions.donActed) { socket.emit('chat message', createSystemMessage('Already acted.', 'error')); return; }
 
         const targetMember = getMemberByUsername(roomCode, target);
-        if (!targetMember || !targetMember.isAlive) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
+        if (!targetMember || !targetMember.isAlive || targetMember.isSpectator) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
         if (targetMember.role === ROLES.DON || targetMember.role === ROLES.MAFIA) { socket.emit('chat message', createSystemMessage('Not your team.', 'error')); return; }
 
         room.nightActions.mafiaKill = targetMember.username;
@@ -677,7 +798,7 @@ function handleCommand(socket, room, roomCode, member, text) {
         if (room.nightActions.donActed) { socket.emit('chat message', createSystemMessage('Already acted.', 'error')); return; }
 
         const targetMember = getMemberByUsername(roomCode, target);
-        if (!targetMember || !targetMember.isAlive) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
+        if (!targetMember || !targetMember.isAlive || targetMember.isSpectator) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
 
         room.nightActions.donActed = true;
         const isSheriff = targetMember.role === ROLES.SHERIFF;
@@ -693,7 +814,7 @@ function handleCommand(socket, room, roomCode, member, text) {
         if (room.nightActions.sheriffActed) { socket.emit('chat message', createSystemMessage('Already investigated.', 'error')); return; }
 
         const targetMember = getMemberByUsername(roomCode, target);
-        if (!targetMember || !targetMember.isAlive) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
+        if (!targetMember || !targetMember.isAlive || targetMember.isSpectator) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
 
         room.nightActions.sheriffActed = true;
         const isMafia = targetMember.role === ROLES.DON || targetMember.role === ROLES.MAFIA;
@@ -712,12 +833,10 @@ function handleCommand(socket, room, roomCode, member, text) {
         if (!member.isAlive) { socket.emit('chat message', createSystemMessage('Dead cannot vote.', 'error')); return; }
 
         const targetMember = getMemberByUsername(roomCode, target);
-        if (!targetMember || !targetMember.isAlive) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
+        if (!targetMember || !targetMember.isAlive || targetMember.isSpectator) { socket.emit('chat message', createSystemMessage('Invalid target.', 'error')); return; }
 
-        // Remove from skip if was skipping
         room.skipVotes.delete(socket.id);
 
-        // Remove old vote
         if (member.votedFor) {
             const old = room.votes.get(member.votedFor) || 0;
             if (old > 1) room.votes.set(member.votedFor, old - 1);
@@ -732,8 +851,9 @@ function handleCommand(socket, room, roomCode, member, text) {
         room.votes.set(targetMember.username, count);
 
         io.to(roomCode).emit('chat message', createSystemMessage(`🗳️ ${member.username} → ${targetMember.username} (${count})`));
+        broadcastRoomUsers(roomCode);
 
-        checkDayEnd(roomCode);
+        checkInstantResolution(roomCode);
         return;
     }
 
@@ -742,7 +862,6 @@ function handleCommand(socket, room, roomCode, member, text) {
         if (room.gameState !== 'DAY') { socket.emit('chat message', createSystemMessage('Day only.', 'error')); return; }
         if (!member.isAlive) { socket.emit('chat message', createSystemMessage('Dead cannot vote.', 'error')); return; }
 
-        // Remove previous vote if any
         if (member.votedFor) {
             const old = room.votes.get(member.votedFor) || 0;
             if (old > 1) room.votes.set(member.votedFor, old - 1);
@@ -755,8 +874,9 @@ function handleCommand(socket, room, roomCode, member, text) {
         room.members.set(socket.id, member);
 
         io.to(roomCode).emit('chat message', createSystemMessage(`⏭️ ${member.username} voted to skip (${room.skipVotes.size})`));
+        broadcastRoomUsers(roomCode);
 
-        checkDayEnd(roomCode);
+        checkInstantResolution(roomCode);
         return;
     }
 

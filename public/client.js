@@ -190,6 +190,9 @@ socket.on('roomJoined', (data) => {
     gameState = 'LOBBY';
     myRole = null;
 
+    // Track spectator status
+    const isSpectator = data.isSpectator || false;
+
     currentRoomCodeDisplay.textContent = data.roomCode;
 
     // Mode-specific UI rendering
@@ -199,7 +202,7 @@ socket.on('roomJoined', (data) => {
         phaseIndicator.style.display = 'block';
         standardCommands.style.display = 'none';
         gameCommands.style.display = 'block';
-        roomNameDisplay.textContent = 'Mafia Game';
+        roomNameDisplay.textContent = isSpectator ? 'Mafia Game 👁️' : 'Mafia Game';
         membersTitle.textContent = 'Players';
         updatePhaseUI('LOBBY');
     } else {
@@ -261,6 +264,9 @@ copyCodeBtn.addEventListener('click', () => {
 // ============================================================
 // Game Events
 // ============================================================
+const timerDisplay = document.getElementById('timer-display');
+const timerText = document.getElementById('timer-text');
+
 socket.on('roleAssigned', (data) => {
     myRole = data.role;
     myTeam = data.team;
@@ -285,12 +291,32 @@ socket.on('phaseChange', (data) => {
     updatePhaseUI(data.phase, data.round);
 });
 
+// Timer updates
+socket.on('timer_update', (data) => {
+    if (data.active && data.seconds > 0) {
+        timerDisplay.style.display = 'block';
+        timerText.textContent = `⏱️ ${data.seconds}s`;
+
+        // Color coding based on time remaining
+        if (data.seconds <= 10) {
+            timerText.classList.add('timer-urgent');
+        } else {
+            timerText.classList.remove('timer-urgent');
+        }
+    } else {
+        timerDisplay.style.display = 'none';
+    }
+});
+
 function updatePhaseUI(phase, round) {
     gameState = phase;
 
     if (phase === 'LOBBY') {
         phaseText.textContent = 'LOBBY';
         phaseIndicator.className = 'phase-indicator phase-lobby';
+    } else if (phase === 'DAY_1') {
+        phaseText.textContent = '☀️ Day 1 (Intro)';
+        phaseIndicator.className = 'phase-indicator phase-day';
     } else if (phase === 'NIGHT') {
         phaseText.textContent = `🌙 Night ${round || ''}`;
         phaseIndicator.className = 'phase-indicator phase-night';
@@ -314,6 +340,25 @@ socket.on('gameOver', (data) => {
 gameoverClose.addEventListener('click', () => {
     gameoverModal.style.display = 'none';
 });
+
+// ============================================================
+// Clear Chat on Mafia Win
+// ============================================================
+function clearChatOnMafiaWin() {
+    const chatBox = document.getElementById('messages-area');
+    if (!chatBox) return;
+
+    // Remove all child elements
+    while (chatBox.firstChild) {
+        chatBox.removeChild(chatBox.firstChild);
+    }
+
+    // Add victory message
+    const victoryDiv = document.createElement('div');
+    victoryDiv.classList.add('message', 'system', 'victory-message');
+    victoryDiv.textContent = 'Mafia Wins! Chat cleared.';
+    chatBox.appendChild(victoryDiv);
+}
 
 // ============================================================
 // Messages
@@ -459,13 +504,27 @@ socket.on('online users', (data) => {
         nameSpan.classList.add('player-name');
         nameSpan.textContent = user.username;
 
+        // MAFIA Room: Show spectator icon
+        if (isMafiaRoom && user.isSpectator) {
+            nameSpan.textContent += ' 👁️';
+            li.classList.add('spectator');
+        }
+
         // MAFIA Room only: Show crown for leader
-        if (isMafiaRoom && user.isLeader) nameSpan.textContent += ' 👑';
+        if (isMafiaRoom && user.isLeader && !user.isSpectator) nameSpan.textContent += ' 👑';
         if (user.username === username) nameSpan.textContent += ' (You)';
+
+        // Show voted status (not for spectators)
+        if (isMafiaRoom && user.hasVoted && user.isAlive && !user.isSpectator) {
+            const votedSpan = document.createElement('span');
+            votedSpan.classList.add('voted-indicator');
+            votedSpan.textContent = ' ✅';
+            nameSpan.appendChild(votedSpan);
+        }
         li.appendChild(nameSpan);
 
-        // MAFIA Room only: Show hearts/skulls
-        if (isMafiaRoom) {
+        // MAFIA Room only: Show hearts/skulls (not for spectators)
+        if (isMafiaRoom && !user.isSpectator) {
             const statusSpan = document.createElement('span');
             statusSpan.classList.add('player-status');
             statusSpan.textContent = user.isAlive ? '❤️' : '💀';
