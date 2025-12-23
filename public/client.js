@@ -55,12 +55,21 @@ const typingText = document.getElementById('typing-text');
 const contextMenu = document.getElementById('context-menu');
 const contextCopy = document.getElementById('ctx-copy');
 
+// Mobile menu elements
+const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+const mobileMembersBtn = document.getElementById('mobile-members-btn');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebar-overlay');
+const onlineUsersContainer = document.getElementById('online-users');
+
 // ============================================================
 // State
 // ============================================================
 let username = '';
 let currentRoom = '';
 let isLeader = false;
+let currentLeaderUsername = '';
+let leaderActivated = false; // Track if leader has been activated via /getleader
 let myRole = null;
 let myTeam = null;
 let gameState = 'LOBBY';
@@ -185,10 +194,24 @@ const membersTitle = document.getElementById('members-title');
 socket.on('roomJoined', (data) => {
     username = usernameInput.value.trim();
     currentRoom = data.roomCode;
-    isLeader = data.isLeader;
+    isLeader = false; // Leader status only set via /getleader
     isMafiaRoom = data.isMafiaRoom || false;
     gameState = 'LOBBY';
     myRole = null;
+    leaderActivated = false; // Reset leader activation on room join
+    
+    // Initialize leader info from server
+    if (data.currentLeaderId && data.currentLeaderUsername) {
+        currentLeaderUsername = data.currentLeaderUsername;
+        leaderActivated = true;
+        if (data.currentLeaderUsername === username) {
+            isLeader = true;
+        }
+        // Update UI immediately
+        setTimeout(() => updateLeaderStyling(), 100);
+    } else {
+        currentLeaderUsername = '';
+    }
 
     // Track spectator status
     const isSpectator = data.isSpectator || false;
@@ -196,6 +219,10 @@ socket.on('roomJoined', (data) => {
     currentRoomCodeDisplay.textContent = data.roomCode;
 
     // Mode-specific UI rendering
+    const mobileRoleBadge = document.getElementById('mobile-role-badge');
+    const mobileGameActions = document.getElementById('mobile-game-actions');
+    const isMobile = window.innerWidth <= 768;
+    
     if (isMafiaRoom) {
         // MAFIA Room: Show game UI
         roleDisplay.style.display = 'none';
@@ -205,14 +232,36 @@ socket.on('roomJoined', (data) => {
         roomNameDisplay.textContent = isSpectator ? 'Mafia Game 👁️' : 'Mafia Game';
         membersTitle.textContent = 'Players';
         updatePhaseUI('LOBBY');
+        
+        // Show mobile role badge and game actions (only on mobile)
+        if (isMobile) {
+            if (mobileRoleBadge) {
+                mobileRoleBadge.style.display = 'block';
+                const mobileRoleText = document.getElementById('mobile-role-text');
+                if (mobileRoleText && myRole) {
+                    mobileRoleText.textContent = `${ROLE_ICONS[myRole]} ${myRole}`;
+                    mobileRoleText.style.color = ROLE_COLORS[myRole] || '#333';
+                }
+            }
+            if (mobileGameActions) {
+                mobileGameActions.style.display = 'flex';
+            }
+        }
     } else {
-        // Standard Room: Hide game UI
+        // Standard Room: Hide ALL game UI elements
         roleDisplay.style.display = 'none';
         phaseIndicator.style.display = 'none';
         standardCommands.style.display = 'block';
         gameCommands.style.display = 'none';
         roomNameDisplay.textContent = 'Chat Room';
         membersTitle.textContent = 'Members';
+        // Hide timer display in standard mode
+        const timerDisplay = document.getElementById('timer-display');
+        if (timerDisplay) timerDisplay.style.display = 'none';
+        
+        // Hide mobile game UI
+        if (mobileRoleBadge) mobileRoleBadge.style.display = 'none';
+        if (mobileGameActions) mobileGameActions.style.display = 'none';
     }
 
     landingScreen.style.display = 'none';
@@ -280,6 +329,15 @@ socket.on('roleAssigned', (data) => {
     roleDisplay.style.display = 'block';
     roleText.textContent = `${ROLE_ICONS[data.role]} ${data.role}`;
     roleText.style.color = ROLE_COLORS[data.role];
+    
+    // Update mobile role badge (only on mobile)
+    const mobileRoleBadge = document.getElementById('mobile-role-badge');
+    const mobileRoleText = document.getElementById('mobile-role-text');
+    if (mobileRoleBadge && mobileRoleText && window.innerWidth <= 768) {
+        mobileRoleBadge.style.display = 'block';
+        mobileRoleText.textContent = `${ROLE_ICONS[data.role]} ${data.role}`;
+        mobileRoleText.style.color = ROLE_COLORS[data.role];
+    }
 });
 
 roleModalClose.addEventListener('click', () => {
@@ -353,11 +411,14 @@ function clearChatOnMafiaWin() {
         chatBox.removeChild(chatBox.firstChild);
     }
 
-    // Add victory message
-    const victoryDiv = document.createElement('div');
-    victoryDiv.classList.add('message', 'system', 'victory-message');
-    victoryDiv.textContent = 'Mafia Wins! Chat cleared.';
-    chatBox.appendChild(victoryDiv);
+    // Add victory message using proper structure
+    const victoryMsg = {
+        id: Date.now(),
+        username: 'SYSTEM',
+        text: 'Mafia Wins! Chat cleared.',
+        type: 'victory'
+    };
+    renderMessage(victoryMsg);
 }
 
 // ============================================================
@@ -374,13 +435,23 @@ function renderMessage(data) {
     const container = document.createElement('div');
     container.classList.add('message-container');
     container.id = `msg-${data.id}`;
+    container.dataset.messageId = data.id;
+    container.dataset.messageAuthor = data.username;
 
-    const messageDiv = document.createElement('div');
-    messageDiv.classList.add('message');
+    const wrapper = document.createElement('div');
+    wrapper.classList.add('message-wrapper');
+    
+    // Add alignment class to container
+    if (data.username !== 'SYSTEM') {
+        const isMe = data.username === username || data.username.includes(username);
+        container.classList.add(isMe ? 'self' : 'other');
+    }
 
     // System messages
     if (data.username === 'SYSTEM') {
-        messageDiv.classList.add('system');
+        container.classList.add('system-message-container');
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', 'system');
         if (data.type === 'death') messageDiv.classList.add('death-message');
         if (data.type === 'phase') messageDiv.classList.add('phase-message');
         if (data.type === 'victory') messageDiv.classList.add('victory-message');
@@ -388,48 +459,92 @@ function renderMessage(data) {
         if (data.type === 'error') messageDiv.classList.add('error-message');
 
         messageDiv.innerHTML = escapeHtml(data.text);
+        wrapper.appendChild(messageDiv);
     } else {
         const isMe = data.username === username || data.username.includes(username);
-        messageDiv.classList.add(isMe ? 'self' : 'other');
+        wrapper.classList.add(isMe ? 'self' : 'other');
+
+        // Create username row with avatar
+        const usernameRow = document.createElement('div');
+        usernameRow.classList.add('message-username-row');
+
+            // Avatar next to username
+            if (data.avatarUrl) {
+                const avatarImg = document.createElement('img');
+                avatarImg.src = data.avatarUrl;
+                avatarImg.classList.add('message-avatar');
+                avatarImg.onerror = function () { this.src = getFallbackAvatar(data.username); };
+                
+                // Check if user is leader for golden styling
+                if (data.username === currentLeaderUsername && leaderActivated) {
+                    avatarImg.classList.add('leader-avatar');
+                }
+                
+                usernameRow.appendChild(avatarImg);
+            }
+
+        const usernameSpan = document.createElement('span');
+        usernameSpan.classList.add('username');
+        // Add golden styling if user is leader and leader is activated
+        if (data.username === currentLeaderUsername && leaderActivated) {
+            usernameSpan.classList.add('leader-username', 'is-leader');
+            usernameSpan.textContent = `${data.username} (Leader)`;
+        } else {
+            usernameSpan.textContent = data.username;
+        }
+        usernameRow.appendChild(usernameSpan);
+
+        // Message bubble
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message-bubble');
+        if (isMe) {
+            messageDiv.classList.add('self');
+        } else {
+            messageDiv.classList.add('other');
+        }
 
         if (data.isSecret) {
             messageDiv.classList.add('mafia-message');
         }
 
-        const usernameSpan = document.createElement('span');
-        usernameSpan.classList.add('username');
-        usernameSpan.textContent = data.username;
-        messageDiv.appendChild(usernameSpan);
-
         const contentDiv = document.createElement('div');
+        contentDiv.classList.add('message-text');
         contentDiv.innerHTML = escapeHtml(data.text);
         messageDiv.appendChild(contentDiv);
+
+        // Check if message author is leader
+        const messageAuthorIsLeader = data.username === currentLeaderUsername;
+        const canDeleteForEveryone = isMe || isLeader;
+
+        // Remove hover actions menu - only context menu on right-click
+
+        // Context menu for right-click on message bubble
+        messageDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showMessageContextMenu(e.clientX, e.clientY, data.text, data.username);
+        });
+        
+        // Long-press support for mobile (0.5s hold)
+        let longPressTimer;
+        messageDiv.addEventListener('touchstart', (e) => {
+            longPressTimer = setTimeout(() => {
+                e.preventDefault();
+                const touch = e.touches[0] || e.changedTouches[0];
+                showMessageContextMenu(touch.clientX, touch.clientY, data.text, data.username);
+            }, 500);
+        });
+        
+        messageDiv.addEventListener('touchend', () => {
+            clearTimeout(longPressTimer);
+        });
+        
+        messageDiv.addEventListener('touchmove', () => {
+            clearTimeout(longPressTimer);
+        });
+
+        wrapper.appendChild(usernameRow);
+        wrapper.appendChild(messageDiv);
     }
-
-    // Context menu
-    messageDiv.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        showContextMenu(e.clientX, e.clientY, data.text);
-    });
-
-    const wrapper = document.createElement('div');
-    wrapper.classList.add('message-wrapper');
-
-    if (data.username !== 'SYSTEM' && data.avatarUrl) {
-        const avatarContainer = document.createElement('div');
-        avatarContainer.classList.add('avatar-container');
-        const avatarImg = document.createElement('img');
-        avatarImg.src = data.avatarUrl;
-        avatarImg.classList.add('avatar-img');
-        avatarImg.onerror = function () { this.src = getFallbackAvatar(data.username); };
-        avatarContainer.appendChild(avatarImg);
-        wrapper.appendChild(avatarContainer);
-    }
-
-    const messageContent = document.createElement('div');
-    messageContent.classList.add('message-content');
-    messageContent.appendChild(messageDiv);
-    wrapper.appendChild(messageContent);
 
     container.appendChild(wrapper);
     messagesArea.appendChild(container);
@@ -442,7 +557,129 @@ socket.on('loadHistory', (history) => {
 });
 
 socket.on('chat message', (msg) => {
+    // Leader updates are now handled via leader_updated event, not chat messages
     renderMessage(msg);
+});
+
+function removeAllLeaderStyling() {
+    // Remove leader styling from all message usernames
+    const containers = document.querySelectorAll('.message-container');
+    containers.forEach(container => {
+        const usernameSpan = container.querySelector('.username');
+        if (usernameSpan) {
+            usernameSpan.classList.remove('leader-username', 'is-leader');
+            usernameSpan.textContent = usernameSpan.textContent.replace(' (Leader)', '');
+        }
+    });
+    
+    // Remove leader styling from all sidebar usernames
+    const playerNames = document.querySelectorAll('.player-name');
+    playerNames.forEach(nameSpan => {
+        nameSpan.classList.remove('leader-username', 'is-leader');
+        nameSpan.textContent = nameSpan.textContent.replace(' (Leader)', '');
+    });
+    
+    // Remove leader styling from avatars
+    const avatars = document.querySelectorAll('.message-avatar, .user-list-avatar');
+    avatars.forEach(avatar => {
+        avatar.classList.remove('leader-avatar');
+    });
+}
+
+function applyLeaderStyling(leaderUsername) {
+    if (!leaderUsername || !leaderActivated) return;
+    
+    // Apply to message usernames
+    const containers = document.querySelectorAll('.message-container');
+    containers.forEach(container => {
+        const author = container.dataset.messageAuthor;
+        const usernameSpan = container.querySelector('.username');
+        if (usernameSpan && author === leaderUsername) {
+            usernameSpan.classList.add('leader-username', 'is-leader');
+            if (!usernameSpan.textContent.includes('(Leader)')) {
+                usernameSpan.textContent = `${author} (Leader)`;
+            }
+        }
+    });
+    
+    // Apply to sidebar usernames
+    const playerNames = document.querySelectorAll('.player-name');
+    playerNames.forEach(nameSpan => {
+        const nameText = nameSpan.textContent.replace(' (Leader)', '').replace(' (You)', '').trim();
+        if (nameText === leaderUsername) {
+            nameSpan.classList.add('leader-username', 'is-leader');
+            if (!nameSpan.textContent.includes('(Leader)')) {
+                const youText = nameSpan.textContent.includes('(You)') ? ' (You)' : '';
+                nameSpan.textContent = `${nameText} (Leader)${youText}`;
+            }
+        }
+    });
+    
+    // Apply to avatars
+    const containersWithAvatar = document.querySelectorAll('.message-container');
+    containersWithAvatar.forEach(container => {
+        const author = container.dataset.messageAuthor;
+        const avatar = container.querySelector('.message-avatar');
+        if (avatar && author === leaderUsername) {
+            avatar.classList.add('leader-avatar');
+        }
+    });
+    
+    const sidebarItems = document.querySelectorAll('.player-item');
+    sidebarItems.forEach(item => {
+        const nameSpan = item.querySelector('.player-name');
+        if (nameSpan) {
+            const nameText = nameSpan.textContent.replace(' (Leader)', '').replace(' (You)', '').trim();
+            if (nameText === leaderUsername) {
+                const avatar = item.querySelector('.user-list-avatar');
+                if (avatar) avatar.classList.add('leader-avatar');
+            }
+        }
+    });
+}
+
+function updateLeaderStyling() {
+    if (currentLeaderUsername && leaderActivated) {
+        removeAllLeaderStyling();
+        applyLeaderStyling(currentLeaderUsername);
+    } else {
+        removeAllLeaderStyling();
+    }
+}
+
+socket.on('message_deleted', (data) => {
+    const container = document.getElementById(`msg-${data.messageId}`);
+    if (container) {
+        container.style.opacity = '0';
+        container.style.transform = 'translateX(-20px)';
+        setTimeout(() => container.remove(), 200);
+    }
+});
+
+socket.on('leader_updated', (data) => {
+    // Remove leader styling from everyone first
+    removeAllLeaderStyling();
+    
+    if (data.leaderId && data.leaderUsername) {
+        // Set new leader
+        currentLeaderUsername = data.leaderUsername;
+        leaderActivated = true;
+        
+        // Update isLeader status if this user is the leader
+        if (data.leaderUsername === username) {
+            isLeader = true;
+        } else {
+            isLeader = false;
+        }
+        
+        // Apply leader styling to the new leader
+        applyLeaderStyling(data.leaderUsername);
+    } else {
+        // No leader - clear everything
+        currentLeaderUsername = '';
+        leaderActivated = false;
+        isLeader = false;
+    }
 });
 
 socket.on('system message', (data) => {
@@ -472,6 +709,28 @@ socket.on('online users', (data) => {
     const users = data.users || [];
 
     userList.innerHTML = '';
+    
+    // Track current leader username and update if changed
+    const leaderUser = users.find(u => u.isLeader);
+    const newLeaderUsername = leaderUser ? leaderUser.username : '';
+    
+    // If leader changed, update all message usernames
+    if (newLeaderUsername !== currentLeaderUsername) {
+        currentLeaderUsername = newLeaderUsername;
+        // Re-render messages to update leader styling
+        const containers = document.querySelectorAll('.message-container');
+        containers.forEach(container => {
+            const author = container.dataset.messageAuthor;
+            const usernameSpan = container.querySelector('.username');
+            if (usernameSpan) {
+                if (author === currentLeaderUsername) {
+                    usernameSpan.classList.add('leader-username');
+                } else {
+                    usernameSpan.classList.remove('leader-username');
+                }
+            }
+        });
+    }
 
     users.forEach(user => {
         const li = document.createElement('li');
@@ -497,12 +756,31 @@ socket.on('online users', (data) => {
         const avatarImg = document.createElement('img');
         avatarImg.src = user.avatarUrl || getFallbackAvatar(user.username);
         avatarImg.classList.add('user-list-avatar');
+        // Add golden leader styling
+        if (user.username === currentLeaderUsername && leaderActivated) {
+            avatarImg.classList.add('leader-avatar');
+        }
         avatarImg.onerror = function () { this.src = getFallbackAvatar(user.username); };
         li.appendChild(avatarImg);
 
         const nameSpan = document.createElement('span');
         nameSpan.classList.add('player-name');
-        nameSpan.textContent = user.username;
+        // Add golden styling if user is leader and leader is activated
+        if (user.username === currentLeaderUsername && leaderActivated) {
+            nameSpan.classList.add('leader-username', 'is-leader');
+            nameSpan.textContent = `${user.username} (Leader)`;
+        } else {
+            nameSpan.textContent = user.username;
+        }
+        
+        // Add context menu for leaders (non-MAFIA rooms only)
+        if (!isMafiaRoom && isLeader && user.username !== username) {
+            nameSpan.style.cursor = 'pointer';
+            nameSpan.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                showUserContextMenu(e.clientX, e.clientY, user.username);
+            });
+        }
 
         // MAFIA Room: Show spectator icon
         if (isMafiaRoom && user.isSpectator) {
@@ -524,6 +802,7 @@ socket.on('online users', (data) => {
         li.appendChild(nameSpan);
 
         // MAFIA Room only: Show hearts/skulls (not for spectators)
+        // Hide in standard mode
         if (isMafiaRoom && !user.isSpectator) {
             const statusSpan = document.createElement('span');
             statusSpan.classList.add('player-status');
@@ -547,12 +826,193 @@ function showContextMenu(x, y, text) {
     contextMenu.style.top = `${y}px`;
 }
 
-document.addEventListener('click', () => contextMenu.style.display = 'none');
+function showMessageContextMenu(x, y, text, messageAuthor) {
+    const messageContextMenu = document.getElementById('message-context-menu');
+    if (!messageContextMenu) return;
+    
+    selectedText = text;
+    messageContextMenu.dataset.messageAuthor = messageAuthor;
+    
+    // Find the message container to get message ID
+    const messageContainer = document.elementFromPoint(x, y)?.closest('.message-container');
+    if (messageContainer) {
+        messageContextMenu.dataset.messageId = messageContainer.id.replace('msg-', '');
+    }
+    
+    // Show/hide options based on permissions
+    const copyBtn = document.getElementById('ctx-msg-copy');
+    const deleteMeBtn = document.getElementById('ctx-msg-delete-me');
+    const deleteAllBtn = document.getElementById('ctx-msg-delete-all');
+    const muteBtn = document.getElementById('ctx-msg-mute');
+    const unmuteBtn = document.getElementById('ctx-msg-unmute');
+    const kickBtn = document.getElementById('ctx-msg-kick');
+    const divider1 = document.getElementById('ctx-msg-divider-1');
+    const divider2 = document.getElementById('ctx-msg-divider-2');
+    
+    // Always show copy and delete for me
+    if (copyBtn) copyBtn.style.display = 'flex';
+    if (deleteMeBtn) deleteMeBtn.style.display = 'flex';
+    
+    // Show delete for everyone only if user is author or leader
+    const canDeleteForEveryone = (messageAuthor === username) || (isLeader && leaderActivated);
+    if (deleteAllBtn) {
+        deleteAllBtn.style.display = canDeleteForEveryone ? 'flex' : 'none';
+    }
+    
+    // Show leader actions only if user is leader and activated, and not clicking own message
+    if (isLeader && leaderActivated && !isMafiaRoom && messageAuthor !== username) {
+        if (muteBtn) muteBtn.style.display = 'flex';
+        if (unmuteBtn) unmuteBtn.style.display = 'flex';
+        if (kickBtn) kickBtn.style.display = 'flex';
+        if (divider2) divider2.style.display = 'block';
+    } else {
+        if (muteBtn) muteBtn.style.display = 'none';
+        if (unmuteBtn) unmuteBtn.style.display = 'none';
+        if (kickBtn) kickBtn.style.display = 'none';
+        if (divider2) divider2.style.display = 'none';
+    }
+    
+    messageContextMenu.style.display = 'block';
+    messageContextMenu.style.left = `${x}px`;
+    messageContextMenu.style.top = `${y}px`;
+}
+
+function showUserContextMenu(x, y, targetUsername) {
+    const userContextMenu = document.getElementById('user-context-menu');
+    if (!userContextMenu) return;
+    
+    userContextMenu.dataset.targetUsername = targetUsername;
+    userContextMenu.style.display = 'block';
+    userContextMenu.style.left = `${x}px`;
+    userContextMenu.style.top = `${y}px`;
+}
+
+document.addEventListener('click', () => {
+    contextMenu.style.display = 'none';
+    const userContextMenu = document.getElementById('user-context-menu');
+    if (userContextMenu) userContextMenu.style.display = 'none';
+    const messageContextMenu = document.getElementById('message-context-menu');
+    if (messageContextMenu) messageContextMenu.style.display = 'none';
+});
 
 contextCopy.addEventListener('click', () => {
     navigator.clipboard.writeText(selectedText);
     contextMenu.style.display = 'none';
 });
+
+// User context menu handlers
+const userContextMute = document.getElementById('ctx-mute');
+const userContextUnmute = document.getElementById('ctx-unmute');
+const userContextKick = document.getElementById('ctx-kick');
+
+if (userContextMute) {
+    userContextMute.addEventListener('click', () => {
+        const menu = document.getElementById('user-context-menu');
+        const targetUsername = menu?.dataset.targetUsername;
+        if (targetUsername) {
+            socket.emit('chat message', { text: `/mute ${targetUsername}` });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (userContextUnmute) {
+    userContextUnmute.addEventListener('click', () => {
+        const menu = document.getElementById('user-context-menu');
+        const targetUsername = menu?.dataset.targetUsername;
+        if (targetUsername) {
+            socket.emit('chat message', { text: `/unmute ${targetUsername}` });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (userContextKick) {
+    userContextKick.addEventListener('click', () => {
+        const menu = document.getElementById('user-context-menu');
+        const targetUsername = menu?.dataset.targetUsername;
+        if (targetUsername) {
+            socket.emit('chat message', { text: `/kick ${targetUsername}` });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+// Message context menu handlers
+const messageContextCopy = document.getElementById('ctx-msg-copy');
+const messageContextDeleteMe = document.getElementById('ctx-msg-delete-me');
+const messageContextDeleteAll = document.getElementById('ctx-msg-delete-all');
+const messageContextMute = document.getElementById('ctx-msg-mute');
+const messageContextUnmute = document.getElementById('ctx-msg-unmute');
+const messageContextKick = document.getElementById('ctx-msg-kick');
+
+if (messageContextCopy) {
+    messageContextCopy.addEventListener('click', () => {
+        navigator.clipboard.writeText(selectedText);
+        const menu = document.getElementById('message-context-menu');
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (messageContextDeleteMe) {
+    messageContextDeleteMe.addEventListener('click', () => {
+        const menu = document.getElementById('message-context-menu');
+        const messageId = menu?.dataset.messageId;
+        if (messageId) {
+            const container = document.getElementById(`msg-${messageId}`);
+            if (container) {
+                container.style.opacity = '0';
+                container.style.transform = 'translateX(-20px)';
+                setTimeout(() => container.remove(), 200);
+            }
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (messageContextDeleteAll) {
+    messageContextDeleteAll.addEventListener('click', () => {
+        const menu = document.getElementById('message-context-menu');
+        const messageId = menu?.dataset.messageId;
+        if (messageId) {
+            socket.emit('delete_message', { messageId, roomCode: currentRoom });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (messageContextMute) {
+    messageContextMute.addEventListener('click', () => {
+        const menu = document.getElementById('message-context-menu');
+        const targetUsername = menu?.dataset.messageAuthor;
+        if (targetUsername && targetUsername !== username) {
+            socket.emit('chat message', { text: `/mute ${targetUsername}` });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (messageContextUnmute) {
+    messageContextUnmute.addEventListener('click', () => {
+        const menu = document.getElementById('message-context-menu');
+        const targetUsername = menu?.dataset.messageAuthor;
+        if (targetUsername && targetUsername !== username) {
+            socket.emit('chat message', { text: `/unmute ${targetUsername}` });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+if (messageContextKick) {
+    messageContextKick.addEventListener('click', () => {
+        const menu = document.getElementById('message-context-menu');
+        const targetUsername = menu?.dataset.messageAuthor;
+        if (targetUsername && targetUsername !== username) {
+            socket.emit('chat message', { text: `/kick ${targetUsername}` });
+        }
+        if (menu) menu.style.display = 'none';
+    });
+}
 
 // ============================================================
 // Send Message
@@ -569,6 +1029,13 @@ function sendMessage() {
 sendButton.addEventListener('click', sendMessage);
 messageInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
+});
+
+// Auto-scroll to bottom when input is focused (mobile)
+messageInput.addEventListener('focus', () => {
+    setTimeout(() => {
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+    }, 300); // Wait for keyboard animation
 });
 
 // ============================================================
@@ -639,5 +1106,70 @@ emojiPicker.querySelectorAll('span').forEach(span => {
         e.stopPropagation();
         messageInput.value += span.textContent;
         messageInput.focus();
+    });
+});
+
+// ============================================================
+// Mobile Menu Toggle
+// ============================================================
+if (mobileMenuBtn) {
+    mobileMenuBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('mobile-open');
+        sidebarOverlay.classList.toggle('active');
+    });
+}
+
+if (mobileMembersBtn) {
+    mobileMembersBtn.addEventListener('click', () => {
+        onlineUsersContainer.classList.toggle('mobile-open');
+        sidebarOverlay.classList.toggle('active');
+    });
+}
+
+if (sidebarOverlay) {
+    sidebarOverlay.addEventListener('click', () => {
+        sidebar.classList.remove('mobile-open');
+        onlineUsersContainer.classList.remove('mobile-open');
+        sidebarOverlay.classList.remove('active');
+    });
+}
+
+// Close mobile menus on window resize
+window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) {
+        sidebar.classList.remove('mobile-open');
+        onlineUsersContainer.classList.remove('mobile-open');
+        sidebarOverlay.classList.remove('active');
+    }
+    
+    // Update mobile game UI visibility
+    const mobileRoleBadge = document.getElementById('mobile-role-badge');
+    const mobileGameActions = document.getElementById('mobile-game-actions');
+    if (window.innerWidth <= 768 && isMafiaRoom) {
+        if (mobileRoleBadge && myRole) {
+            mobileRoleBadge.style.display = 'block';
+        }
+        if (mobileGameActions) {
+            mobileGameActions.style.display = 'flex';
+        }
+    } else {
+        if (mobileRoleBadge) mobileRoleBadge.style.display = 'none';
+        if (mobileGameActions) mobileGameActions.style.display = 'none';
+    }
+});
+
+// Mobile game action buttons
+const gameActionButtons = document.querySelectorAll('.game-action-btn');
+gameActionButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        if (action === 'vote') {
+            const target = prompt('Enter player name to vote:');
+            if (target) {
+                socket.emit('chat message', { text: `/vote ${target}` });
+            }
+        } else if (action === 'skip') {
+            socket.emit('chat message', { text: '/skip' });
+        }
     });
 });

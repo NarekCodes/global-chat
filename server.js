@@ -483,7 +483,7 @@ io.on('connection', (socket) => {
         activeRooms[roomCode] = {
             history: [],
             members: new Map([[socket.id, { username, avatarUrl: socket.avatarUrl, isAlive: true, hasVoted: false, isSpectator: false }]]),
-            leaderId: socket.id,
+            leaderId: null, // No auto-leader assignment
             mutedUsers: new Set(),
             isPermanent: false,
             isMafiaRoom: false
@@ -493,7 +493,15 @@ io.on('connection', (socket) => {
         const msg = createSystemMessage(`${username} created the room.`);
         activeRooms[roomCode].history.push(msg);
 
-        socket.emit('roomJoined', { roomCode, isLeader: true, isMafiaRoom: false });
+        const room = activeRooms[roomCode];
+        const leader = room.leaderId ? room.members.get(room.leaderId) : null;
+        socket.emit('roomJoined', { 
+            roomCode, 
+            isLeader: false, 
+            isMafiaRoom: false,
+            currentLeaderId: room.leaderId,
+            currentLeaderUsername: leader?.username || null
+        });
         socket.emit('loadHistory', activeRooms[roomCode].history);
         broadcastRoomUsers(roomCode);
     });
@@ -557,7 +565,7 @@ io.on('connection', (socket) => {
             isSpectator
         });
 
-        if (!room.leaderId) room.leaderId = socket.id;
+        // No auto-leader assignment - leader must be set via /getleader
 
         socket.join(roomCode);
 
@@ -567,11 +575,14 @@ io.on('connection', (socket) => {
         room.history.push(joinMsg);
         io.to(roomCode).emit('chat message', joinMsg);
 
+        const leader = room.leaderId ? room.members.get(room.leaderId) : null;
         socket.emit('roomJoined', {
             roomCode,
-            isLeader: socket.id === room.leaderId,
+            isLeader: false, // Leader status only set via /getleader
             isMafiaRoom: room.isMafiaRoom,
-            isSpectator
+            isSpectator,
+            currentLeaderId: room.leaderId,
+            currentLeaderUsername: leader?.username || null
         });
         socket.emit('loadHistory', room.history);
 
@@ -647,6 +658,38 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('chat message', message);
     });
 
+    socket.on('delete_message', (data) => {
+        const roomCode = socket.roomCode || data.roomCode;
+        if (!roomCode || !activeRooms[roomCode]) return;
+
+        const room = activeRooms[roomCode];
+        const member = room.members.get(socket.id);
+        if (!member) return;
+
+        // Check if user is leader or message author
+        const isLeader = socket.id === room.leaderId;
+        const message = room.history.find(msg => msg.id === data.messageId);
+        
+        if (!message) return;
+        
+        const isAuthor = message.username === member.username;
+        
+        // Only allow deletion if user is leader or message author
+        if (!isLeader && !isAuthor) {
+            socket.emit('chat message', createSystemMessage('You can only delete your own messages or be a leader.', 'error'));
+            return;
+        }
+
+        // Remove message from history
+        const messageIndex = room.history.findIndex(msg => msg.id === data.messageId);
+        if (messageIndex !== -1) {
+            room.history.splice(messageIndex, 1);
+        }
+
+        // Broadcast deletion to all clients
+        io.to(roomCode).emit('message_deleted', { messageId: data.messageId });
+    });
+
     socket.on('typing', () => { if (socket.roomCode) socket.to(socket.roomCode).emit('userTyping', socket.username); });
     socket.on('stopTyping', () => { if (socket.roomCode) socket.to(socket.roomCode).emit('userStopTyping', socket.username); });
 
@@ -674,10 +717,11 @@ io.on('connection', (socket) => {
 
         room.members.delete(socket.id);
 
-        if (room.leaderId === socket.id && room.members.size > 0) {
-            room.leaderId = room.members.keys().next().value;
-            const newLeader = room.members.get(room.leaderId);
-            io.to(roomCode).emit('chat message', createSystemMessage(`${newLeader?.username} is now Leader.`));
+        // Don't auto-assign new leader on disconnect - leader must be set via /getleader
+        if (room.leaderId === socket.id) {
+            room.leaderId = null;
+            io.to(roomCode).emit('leader_removed', {});
+            broadcastRoomUsers(roomCode);
         }
 
         if (room.members.size === 0 && !room.isPermanent) {
@@ -710,15 +754,54 @@ function handleCommand(socket, room, roomCode, member, text) {
                 if (member.role === ROLES.SHERIFF) commands.push('/investigate [name]');
             }
         } else {
-            commands = ['/help', '/getleader', '/kick [name]', '/mute [name]', '/unmute [name]'];
+            commands = ['/help', '/getleader', '/removeleader', '/kick [name]', '/mute [name]', '/unmute [name]'];
         }
         socket.emit('system message', { title: 'Commands:', commands });
         return;
     }
 
     if (command === '/getleader') {
+        // If no leader exists, assign the command sender as leader
+        if (!room.leaderId) {
+            room.leaderId = socket.id;
+            const newLeader = room.members.get(socket.id);
+            io.to(roomCode).emit('chat message', createSystemMessage(`${newLeader?.username} is now Leader.`));
+            // Broadcast leader update to all clients
+            io.to(roomCode).emit('leader_updated', { 
+                leaderId: socket.id, 
+                leaderUsername: newLeader?.username 
+            });
+            broadcastRoomUsers(roomCode);
+            return;
+        }
+        
+        // If leader exists, just show who it is and broadcast to all
         const leader = room.members.get(room.leaderId);
-        socket.emit('chat message', createSystemMessage(`Leader: ${leader?.username || 'None'}`));
+        const leaderUsername = leader?.username || 'None';
+        socket.emit('chat message', createSystemMessage(`Leader: ${leaderUsername}`));
+        // Broadcast leader update to all clients
+        if (leaderUsername !== 'None') {
+            io.to(roomCode).emit('leader_updated', { 
+                leaderId: room.leaderId, 
+                leaderUsername 
+            });
+        }
+        return;
+    }
+
+    if (command === '/removeleader') {
+        if (!isLeader) {
+            socket.emit('chat message', createSystemMessage('Only the current leader can step down.', 'error'));
+            return;
+        }
+        room.leaderId = null;
+        io.to(roomCode).emit('chat message', createSystemMessage(`${member.username} stepped down as leader.`));
+        // Broadcast leader removal to all clients
+        io.to(roomCode).emit('leader_updated', { 
+            leaderId: null, 
+            leaderUsername: null 
+        });
+        broadcastRoomUsers(roomCode);
         return;
     }
 

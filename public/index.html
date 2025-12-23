@@ -3,7 +3,9 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Tumo Connection</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -40,6 +42,7 @@
 
     <!-- Main Interface -->
     <div class="main-container" id="main-interface" style="display: none;">
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
         <div id="sidebar" class="sidebar">
             <div class="sidebar-header">
                 <span class="room-label">Room Code</span>
@@ -70,11 +73,22 @@
 
         <div class="chat-container">
             <header class="chat-header">
+                <button id="mobile-menu-btn" class="mobile-menu-btn" aria-label="Menu">☰</button>
                 <h1><span id="room-name-display">Chat Room</span></h1>
+                <button id="mobile-members-btn" class="mobile-members-btn" aria-label="Members">👥</button>
                 <div id="timer-display" class="timer-display" style="display: none;">
                     <span id="timer-text">⏱️ 60s</span>
                 </div>
             </header>
+            <!-- Mobile Role Badge (Mafia Game) -->
+            <div id="mobile-role-badge" class="mobile-role-badge" style="display: none;">
+                <span id="mobile-role-text"></span>
+            </div>
+            <!-- Mobile Game Actions (Mafia Game) -->
+            <div id="mobile-game-actions" class="mobile-game-actions" style="display: none;">
+                <button class="game-action-btn" data-action="vote">🗳️ Vote</button>
+                <button class="game-action-btn" data-action="skip">⏭️ Skip</button>
+            </div>
             <div id="messages-area" class="messages-area"></div>
             <div id="typing-indicator" class="typing-indicator">
                 <div class="typing-dots"><span></span><span></span><span></span></div>
@@ -135,6 +149,27 @@
     <!-- Context Menu -->
     <div id="context-menu" class="context-menu" style="display: none;">
         <div id="ctx-copy" class="context-item">Copy Text</div>
+    </div>
+
+    <!-- Message Context Menu (Right-click on message bubble) -->
+    <div id="message-context-menu" class="context-menu" style="display: none;">
+        <div class="context-item context-header">bruv</div>
+        <div class="context-divider" id="ctx-msg-divider-1"></div>
+        <div id="ctx-msg-copy" class="context-item">Copy Text</div>
+        <div id="ctx-msg-delete-me" class="context-item">Delete for Me</div>
+        <div id="ctx-msg-delete-all" class="context-item" style="display: none;">Delete for Everyone</div>
+        <div class="context-divider" id="ctx-msg-divider-2" style="display: none;"></div>
+        <div id="ctx-msg-mute" class="context-item" style="display: none;">Mute User</div>
+        <div id="ctx-msg-unmute" class="context-item" style="display: none;">Unmute User</div>
+        <div id="ctx-msg-kick" class="context-item danger-action" style="display: none;">Kick User</div>
+    </div>
+
+    <!-- User Context Menu (for Leaders) -->
+    <div id="user-context-menu" class="context-menu" style="display: none;">
+        <div id="ctx-mute" class="context-item">🔇 Mute User</div>
+        <div id="ctx-unmute" class="context-item">🔊 Unmute User</div>
+        <div class="context-divider"></div>
+        <div id="ctx-kick" class="context-item danger-action">👢 Kick User</div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
