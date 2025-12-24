@@ -7,7 +7,14 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Serve static files from root directory
+app.use(express.static(__dirname));
+// Also serve public directory files at root paths
 app.use(express.static(path.join(__dirname, 'public')));
+// Serve index.html from public directory at root path
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // ============================================================
 // DUAL-MODE: Chat + Mafia Engine (Final Comprehensive Version)
@@ -156,10 +163,21 @@ const getVotedCount = (roomCode) => {
 const checkVictory = (roomCode) => {
     const room = activeRooms[roomCode];
     if (!room || !room.isMafiaRoom || room.gameState === 'LOBBY') return null;
-    const mafia = getMafiaTeam(roomCode);
-    const town = getTownTeam(roomCode);
-    if (mafia.length === 0) return { winner: 'TOWN', message: '🎉 Town Wins! All Mafia eliminated.' };
-    if (mafia.length >= town.length) return { winner: 'MAFIA', message: '😈 Mafia Wins!' };
+    
+    // Get alive players only (exclude spectators and dead players)
+    const mafia = getMafiaTeam(roomCode).filter(m => m.isAlive && !m.isSpectator);
+    const town = getTownTeam(roomCode).filter(m => m.isAlive && !m.isSpectator);
+    
+    // Town wins if all Mafia are eliminated
+    if (mafia.length === 0) {
+        return { winner: 'TOWN', message: '🎉 Town Wins! All Mafia eliminated.' };
+    }
+    
+    // Mafia wins if they equal or exceed Town numbers
+    if (mafia.length >= town.length) {
+        return { winner: 'MAFIA', message: '😈 Mafia Wins! Mafia outnumbers the Town.' };
+    }
+    
     return null;
 };
 
@@ -169,13 +187,36 @@ const eliminatePlayer = (roomCode, targetUsername, reason) => {
     for (const [socketId, memberData] of room.members) {
         if (memberData.username.toLowerCase() === targetUsername.toLowerCase()) {
             memberData.isAlive = false;
+            memberData.hasVoted = false; // Dead players can't vote
+            memberData.votedFor = null; // Clear their vote
             room.members.set(socketId, memberData);
+            
+            // Remove their vote from the vote count if they had voted
+            if (memberData.votedFor) {
+                const oldCount = room.votes.get(memberData.votedFor) || 0;
+                if (oldCount > 1) {
+                    room.votes.set(memberData.votedFor, oldCount - 1);
+                } else {
+                    room.votes.delete(memberData.votedFor);
+                }
+            }
+            
+            // Remove from skip votes if present
+            room.skipVotes.delete(socketId);
+            
             const msg = createSystemMessage(`💀 ${memberData.username} eliminated. ${reason}`, 'death');
             room.history.push(msg);
             io.to(roomCode).emit('chat message', msg);
             const roleMsg = createSystemMessage(`${memberData.username} was a ${memberData.role}.`, 'reveal');
             room.history.push(roleMsg);
             io.to(roomCode).emit('chat message', roleMsg);
+            
+            // Check victory after elimination (caller will handle if needed)
+            const victory = checkVictory(roomCode);
+            if (victory) {
+                endGame(roomCode, victory);
+            }
+            
             break;
         }
     }
@@ -226,29 +267,58 @@ const resolveVoting = (roomCode) => {
 
     clearRoomTimer(roomCode);
 
+    // Get alive players count (excluding spectators)
+    const aliveCount = getAliveCount(roomCode);
+    if (aliveCount === 0) {
+        // Game should have ended already, but handle edge case
+        return;
+    }
+
     const skipCount = room.skipVotes?.size || 0;
     let maxVotes = skipCount;
     let maxTarget = null;
     let hasTie = false;
+    let tieTargets = [];
 
+    // Count votes for each target
     for (const [target, count] of (room.votes || new Map())) {
         if (count > maxVotes) {
             maxVotes = count;
             maxTarget = target;
             hasTie = false;
+            tieTargets = [target];
         } else if (count === maxVotes && count > 0) {
             hasTie = true;
+            tieTargets.push(target);
         }
     }
 
-    if (hasTie || maxTarget === null || skipCount >= maxVotes) {
-        const skipMsg = createSystemMessage(`🚫 Day ended with no elimination.`, 'phase');
+    // Check for tie: multiple targets with same vote count, or skip ties with votes
+    if (hasTie || maxTarget === null || (skipCount > 0 && skipCount === maxVotes)) {
+        const skipMsg = createSystemMessage(`🚫 Day ended with no elimination. ${hasTie ? '(Tie vote)' : ''}`, 'phase');
         room.history.push(skipMsg);
         io.to(roomCode).emit('chat message', skipMsg);
     } else {
+        // Eliminate the player with most votes
         eliminatePlayer(roomCode, maxTarget, 'Voted out.');
+        
+        // Check victory conditions after elimination
         const victory = checkVictory(roomCode);
-        if (victory) { endGame(roomCode, victory); return; }
+        if (victory) { 
+            endGame(roomCode, victory); 
+            return; 
+        }
+    }
+
+    // Clear votes for next round
+    room.votes = new Map();
+    room.skipVotes = new Set();
+    for (const [socketId, memberData] of room.members) {
+        if (memberData.isAlive && !memberData.isSpectator) {
+            memberData.hasVoted = false;
+            memberData.votedFor = null;
+            room.members.set(socketId, memberData);
+        }
     }
 
     room.round++;
@@ -280,12 +350,20 @@ const startNightPhase = (roomCode) => {
     room.nightActions = { mafiaKill: null, donActed: false, sheriffActed: false };
     room.mafiaChat = []; // Fresh Mafia chat each night
 
+    // Check victory before starting night (in case elimination happened)
+    const victory = checkVictory(roomCode);
+    if (victory) { 
+        endGame(roomCode, victory); 
+        return; 
+    }
+
     const msg = createSystemMessage(`🌙 Night ${room.round} falls. Town sleeps...`, 'phase');
     room.history.push(msg);
     io.to(roomCode).emit('chat message', msg);
     io.to(roomCode).emit('phaseChange', { phase: 'NIGHT', round: room.round });
 
-    const mafia = getMafiaTeam(roomCode);
+    // Notify Mafia team (only alive members)
+    const mafia = getMafiaTeam(roomCode).filter(m => m.isAlive && !m.isSpectator);
     mafia.forEach(m => {
         const s = io.sockets.sockets.get(m.socketId);
         if (s) {
@@ -294,12 +372,14 @@ const startNightPhase = (roomCode) => {
         }
     });
 
+    // Notify Sheriff (only if alive)
     for (const [socketId, memberData] of room.members) {
         if (memberData.role === ROLES.SHERIFF && memberData.isAlive && !memberData.isSpectator) {
             const s = io.sockets.sockets.get(socketId);
             if (s) s.emit('chat message', createSystemMessage('/investigate [name]', 'private'));
         }
     }
+    
     broadcastRoomUsers(roomCode);
 };
 
@@ -601,7 +681,114 @@ io.on('connection', (socket) => {
         const member = room.members.get(socket.id);
         if (!member) return;
 
-        const text = data.text.trim();
+        // Handle image messages (Base64)
+        if (data.type === 'image' && data.data) {
+            // Check permissions for image messages
+            if (room.mutedUsers.has(member.username)) {
+                socket.emit('chat message', createSystemMessage('You are muted.', 'error'));
+                return;
+            }
+
+            // Spectators can only send images during LOBBY
+            if (room.isMafiaRoom && member.isSpectator && room.gameState !== 'LOBBY') {
+                socket.emit('chat message', createSystemMessage('Spectators cannot send images during game.', 'error'));
+                return;
+            }
+
+            // Dead cannot send images
+            if (room.isMafiaRoom && !member.isAlive && !member.isSpectator) {
+                socket.emit('chat message', createSystemMessage('Dead cannot speak.', 'error'));
+                return;
+            }
+
+            const message = {
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                username: member.username,
+                avatarUrl: member.avatarUrl,
+                type: 'image',
+                data: data.data, // Base64 DataURL
+                timestamp: new Date().toLocaleTimeString()
+            };
+
+            room.history.push(message);
+            if (room.history.length > HISTORY_LIMIT) room.history.shift();
+            io.to(roomCode).emit('chat message', message);
+            return;
+        }
+
+        // Handle image messages (URL)
+        if (data.type === 'image-url' && data.url) {
+            // Check permissions for image messages
+            if (room.mutedUsers.has(member.username)) {
+                socket.emit('chat message', createSystemMessage('You are muted.', 'error'));
+                return;
+            }
+
+            // Spectators can only send images during LOBBY
+            if (room.isMafiaRoom && member.isSpectator && room.gameState !== 'LOBBY') {
+                socket.emit('chat message', createSystemMessage('Spectators cannot send images during game.', 'error'));
+                return;
+            }
+
+            // Dead cannot send images
+            if (room.isMafiaRoom && !member.isAlive && !member.isSpectator) {
+                socket.emit('chat message', createSystemMessage('Dead cannot speak.', 'error'));
+                return;
+            }
+
+            const message = {
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                username: member.username,
+                avatarUrl: member.avatarUrl,
+                type: 'image-url',
+                url: data.url,
+                timestamp: new Date().toLocaleTimeString()
+            };
+
+            room.history.push(message);
+            if (room.history.length > HISTORY_LIMIT) room.history.shift();
+            io.to(roomCode).emit('chat message', message);
+            return;
+        }
+
+        // Handle voice messages FIRST (before any text processing)
+        if (data.type === 'voice' && data.audioData) {
+            // Check permissions for voice messages
+            if (room.mutedUsers.has(member.username)) {
+                socket.emit('chat message', createSystemMessage('You are muted.', 'error'));
+                return;
+            }
+
+            // Spectators can only send voice during LOBBY
+            if (room.isMafiaRoom && member.isSpectator && room.gameState !== 'LOBBY') {
+                socket.emit('chat message', createSystemMessage('Spectators cannot send voice during game.', 'error'));
+                return;
+            }
+
+            // Dead cannot send voice
+            if (room.isMafiaRoom && !member.isAlive && !member.isSpectator) {
+                socket.emit('chat message', createSystemMessage('Dead cannot speak.', 'error'));
+                return;
+            }
+
+            const message = {
+                id: Date.now() + Math.random().toString(36).substr(2, 9),
+                username: member.username,
+                avatarUrl: member.avatarUrl,
+                type: 'voice',
+                audioData: data.audioData,
+                mimeType: data.mimeType || 'audio/webm',
+                timestamp: new Date().toLocaleTimeString()
+            };
+
+            room.history.push(message);
+            if (room.history.length > HISTORY_LIMIT) room.history.shift();
+            io.to(roomCode).emit('chat message', message);
+            return;
+        }
+
+        // Regular text message processing
+        const text = (data.text || '').trim();
 
         if (text.startsWith('/')) {
             handleCommand(socket, room, roomCode, member, text);
@@ -646,6 +833,7 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Regular text message
         const message = {
             id: Date.now() + Math.random().toString(36).substr(2, 9),
             username: member.username,
@@ -690,8 +878,41 @@ io.on('connection', (socket) => {
         io.to(roomCode).emit('message_deleted', { messageId: data.messageId });
     });
 
-    socket.on('typing', () => { if (socket.roomCode) socket.to(socket.roomCode).emit('userTyping', socket.username); });
-    socket.on('stopTyping', () => { if (socket.roomCode) socket.to(socket.roomCode).emit('userStopTyping', socket.username); });
+    socket.on('typing', (data) => {
+        // Use roomCode from data, or fallback to socket.roomCode
+        const roomCode = data.roomCode || socket.roomCode;
+        const isTyping = data.isTyping;
+        
+        if (!roomCode || !activeRooms[roomCode]) return;
+
+        const room = activeRooms[roomCode];
+        const member = room.members.get(socket.id);
+        if (!member) return;
+
+        // Broadcast typing status to everyone else in the room
+        socket.to(roomCode).emit('user typing', {
+            username: member.username,
+            isTyping: isTyping
+        });
+    });
+
+    socket.on('recording status', (data) => {
+        // Use roomCode from data, or fallback to socket.roomCode
+        const roomCode = data.roomCode || socket.roomCode;
+        const isRecording = data.isRecording;
+        
+        if (!roomCode || !activeRooms[roomCode]) return;
+
+        const room = activeRooms[roomCode];
+        const member = room.members.get(socket.id);
+        if (!member) return;
+
+        // Broadcast recording status to everyone else in the room
+        socket.to(roomCode).emit('user recording', {
+            username: member.username,
+            isRecording: isRecording
+        });
+    });
 
     socket.on('disconnect', () => {
         const roomCode = socket.roomCode;

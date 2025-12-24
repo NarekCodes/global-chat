@@ -21,6 +21,7 @@ const backFromJoin = document.getElementById('back-from-join');
 const messagesArea = document.getElementById('messages-area');
 const messageInput = document.getElementById('message-input');
 const sendButton = document.getElementById('send-button');
+const voiceRecordBtn = document.getElementById('voice-record-btn');
 const userList = document.getElementById('user-list');
 const currentRoomCodeDisplay = document.getElementById('current-room-code');
 const copyCodeBtn = document.getElementById('copy-code-btn');
@@ -50,10 +51,20 @@ const gameoverMessage = document.getElementById('gameover-message');
 const gameoverClose = document.getElementById('gameover-close');
 
 const typingIndicator = document.getElementById('typing-indicator');
-const typingText = document.getElementById('typing-text');
 
 const contextMenu = document.getElementById('context-menu');
 const contextCopy = document.getElementById('ctx-copy');
+
+// Emoji picker elements
+const emojiBtn = document.getElementById('emoji-btn');
+const emojiPicker = document.getElementById('emoji-picker');
+
+// Attachment elements
+const attachBtn = document.getElementById('attach-btn');
+const attachMenu = document.getElementById('attach-menu');
+const fileInput = document.getElementById('file-input');
+const uploadImageBtn = document.getElementById('upload-image-btn');
+const imageUrlBtn = document.getElementById('image-url-btn');
 
 // Mobile menu elements
 const mobileMenuBtn = document.getElementById('mobile-menu-btn');
@@ -73,9 +84,17 @@ let leaderActivated = false; // Track if leader has been activated via /getleade
 let myRole = null;
 let myTeam = null;
 let gameState = 'LOBBY';
-let typingUsers = new Set();
 let typingTimeout;
-let isTyping = false;
+const typingUsers = new Map(); // Track users who are typing
+const recordingUsers = new Map(); // Track users who are recording
+
+// Voice Recording State
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let stream = null;
+let recordingStartTime = null;
+const MIN_RECORDING_DURATION = 300; // Minimum 300ms to send
 
 const ROLE_ICONS = {
     'Don': '🎩',
@@ -200,6 +219,24 @@ socket.on('roomJoined', (data) => {
     myRole = null;
     leaderActivated = false; // Reset leader activation on room join
     
+    // Clear typing and recording users when joining a new room
+    typingUsers.clear();
+    recordingUsers.clear();
+    isCurrentlyTyping = false;
+    isRecording = false;
+    clearTimeout(typingTimeout);
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+    }
+    if (voiceRecordBtn) {
+        voiceRecordBtn.classList.remove('recording');
+    }
+    updateTypingIndicator(); // Hide indicator
+    
     // Initialize leader info from server
     if (data.currentLeaderId && data.currentLeaderUsername) {
         currentLeaderUsername = data.currentLeaderUsername;
@@ -225,12 +262,12 @@ socket.on('roomJoined', (data) => {
     
     if (isMafiaRoom) {
         // MAFIA Room: Show game UI
-        roleDisplay.style.display = 'none';
-        phaseIndicator.style.display = 'block';
-        standardCommands.style.display = 'none';
-        gameCommands.style.display = 'block';
-        roomNameDisplay.textContent = isSpectator ? 'Mafia Game 👁️' : 'Mafia Game';
-        membersTitle.textContent = 'Players';
+        if (roleDisplay) roleDisplay.style.display = 'none';
+        if (phaseIndicator) phaseIndicator.style.display = 'block';
+        if (standardCommands) standardCommands.style.display = 'none';
+        if (gameCommands) gameCommands.style.display = 'block';
+        if (roomNameDisplay) roomNameDisplay.textContent = isSpectator ? 'Mafia Game 👁️' : 'Mafia Game';
+        if (membersTitle) membersTitle.textContent = 'Players';
         updatePhaseUI('LOBBY');
         
         // Show mobile role badge and game actions (only on mobile)
@@ -246,6 +283,9 @@ socket.on('roomJoined', (data) => {
             if (mobileGameActions) {
                 mobileGameActions.style.display = 'flex';
             }
+        } else {
+            if (mobileRoleBadge) mobileRoleBadge.style.display = 'none';
+            if (mobileGameActions) mobileGameActions.style.display = 'none';
         }
     } else {
         // Standard Room: Hide ALL game UI elements
@@ -429,6 +469,157 @@ function escapeHtml(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// High-fidelity Telegram-style emoji layout detection
+// Returns: { isOnly: boolean, count: number, hasText: boolean, size: string }
+function getEmojiLayout(text) {
+    if (!text || text.trim().length === 0) {
+        return { isOnly: false, count: 0, hasText: false, size: 'inline' };
+    }
+    
+    const trimmed = text.trim();
+    
+    // Comprehensive Unicode emoji regex pattern
+    // Covers: Emoticons, Symbols, Pictographs, Transport, Flags, Modifiers, etc.
+    const emojiPattern = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{2190}-\u{21FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{3030}-\u{303F}]|[\u{FE00}-\u{FE0F}]|[\u{200D}]|[\u{20E3}]|[\u{FE0F}]/gu;
+    
+    // Find all emoji sequences (handles multi-character emojis like flags, skin tones)
+    const emojiMatches = trimmed.match(emojiPattern);
+    
+    // Remove all emojis and whitespace to check for remaining text
+    const textWithoutEmojis = trimmed.replace(emojiPattern, '').replace(/\s/g, '');
+    const hasText = textWithoutEmojis.length > 0;
+    
+    if (!emojiMatches) {
+        return { isOnly: false, count: 0, hasText: hasText, size: 'inline' };
+    }
+    
+    // Count distinct emoji sequences (handles zero-width joiners, variation selectors)
+    const emojiCount = countEmojiSequences(trimmed);
+    
+    // Determine size based on Telegram's exact scaling rules
+    let size = 'inline';
+    if (!hasText && emojiCount > 0) {
+        if (emojiCount === 1) {
+            size = 'jumbo-single'; // 128px (5rem)
+        } else if (emojiCount === 2) {
+            size = 'jumbo-double'; // 80px (3rem)
+        } else if (emojiCount === 3) {
+            size = 'jumbo-triple'; // 64px (2.5rem)
+        } else {
+            size = 'inline'; // 4+ emojis or with text: 1.2rem
+        }
+    }
+    
+    return {
+        isOnly: !hasText && emojiCount > 0,
+        count: emojiCount,
+        hasText: hasText,
+        size: size
+    };
+}
+
+// Count emoji sequences properly (handles multi-character emojis)
+function countEmojiSequences(text) {
+    // Split by spaces first
+    const parts = text.trim().split(/\s+/);
+    let count = 0;
+    
+    for (const part of parts) {
+        // Use regex to find emoji sequences
+        // This handles flags (2 regional indicators), skin tones, zero-width joiners
+        const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2B50}-\u{2B55}\u{3030}-\u{303F}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{FE0F}]+/gu;
+        const matches = part.match(emojiRegex);
+        if (matches) {
+            count += matches.length;
+        }
+    }
+    
+    return count;
+}
+
+// Map Unicode emojis to high-quality asset sets
+// Returns the emoji code point for asset mapping
+function getEmojiAssetCode(emoji) {
+    // Convert emoji to code point(s)
+    const codePoints = [];
+    for (let i = 0; i < emoji.length; i++) {
+        const code = emoji.codePointAt(i);
+        if (code > 0xFFFF) {
+            codePoints.push(code.toString(16).toUpperCase());
+            i++; // Skip the surrogate pair
+        } else if (code >= 0x1F300) {
+            codePoints.push(code.toString(16).toUpperCase());
+        }
+    }
+    return codePoints.join('-');
+}
+
+// Lottie-web integration for animated emoji support (Telegram TGS style)
+function renderAnimatedEmoji(emojiCode, targetElement) {
+    // Placeholder for Lottie-web integration
+    // Supports top 50 most common emojis with .json animations
+    if (typeof lottie !== 'undefined') {
+        // Check if this emoji has an animation file
+        const hasAnimation = checkEmojiHasAnimation(emojiCode);
+        
+        if (hasAnimation) {
+            try {
+                // Create container for animation
+                const container = document.createElement('div');
+                container.classList.add('lottie-emoji-container');
+                container.style.position = 'absolute';
+                container.style.width = targetElement.offsetWidth + 'px';
+                container.style.height = targetElement.offsetHeight + 'px';
+                container.style.pointerEvents = 'none';
+                
+                // Load animation
+                const animation = lottie.loadAnimation({
+                    container: container,
+                    renderer: 'svg',
+                    loop: true,
+                    autoplay: true,
+                    path: `https://cdn.jsdelivr.net/npm/telegram-animated-emojis@latest/${emojiCode}.json`
+                });
+                
+                // Position container over emoji
+                const rect = targetElement.getBoundingClientRect();
+                container.style.left = rect.left + 'px';
+                container.style.top = rect.top + 'px';
+                document.body.appendChild(container);
+                
+                // Clean up after animation
+                setTimeout(() => {
+                    animation.destroy();
+                    container.remove();
+                }, 2000);
+                
+                return animation;
+            } catch (error) {
+                console.warn(`[Lottie] Failed to load animation for ${emojiCode}:`, error);
+            }
+        }
+    }
+    
+    console.log(`[Lottie] Animation placeholder for emoji: ${emojiCode}`);
+    return null;
+}
+
+// Check if emoji has animation support (top 50 most common)
+function checkEmojiHasAnimation(emojiCode) {
+    // Top 50 most common emojis that support animations
+    const animatedEmojis = [
+        '1F600', '1F601', '1F602', '1F603', '1F604', '1F605', '1F606', '1F607',
+        '1F608', '1F609', '1F60A', '1F60B', '1F60C', '1F60D', '1F60E', '1F60F',
+        '1F610', '1F611', '1F612', '1F613', '1F614', '1F615', '1F616', '1F617',
+        '1F618', '1F619', '1F61A', '1F61B', '1F61C', '1F61D', '1F61E', '1F61F',
+        '1F620', '1F621', '1F622', '1F623', '1F624', '1F625', '1F626', '1F627',
+        '1F628', '1F629', '1F62A', '1F62B', '1F62C', '1F62D', '1F62E', '1F62F',
+        '1F630', '1F631', '1F632', '1F633'
+    ];
+    
+    return animatedEmojis.includes(emojiCode.toUpperCase());
+}
+
 function renderMessage(data) {
     if (!data.id) data.id = Date.now() + Math.random().toString(36).substr(2, 9);
 
@@ -507,10 +698,365 @@ function renderMessage(data) {
             messageDiv.classList.add('mafia-message');
         }
 
-        const contentDiv = document.createElement('div');
-        contentDiv.classList.add('message-text');
-        contentDiv.innerHTML = escapeHtml(data.text);
-        messageDiv.appendChild(contentDiv);
+        // Handle voice messages vs regular text messages
+        if (data.type === 'voice' && data.audioData) {
+            // Create Telegram-style voice message UI
+            const voiceDiv = document.createElement('div');
+            voiceDiv.classList.add('voice-message');
+            voiceDiv.classList.add(isMe ? 'voice-self' : 'voice-other');
+            voiceDiv.dataset.messageId = data.id;
+            
+            // Hidden audio element
+            const audio = document.createElement('audio');
+            audio.src = data.audioData;
+            audio.preload = 'metadata';
+            audio.style.display = 'none';
+            audio.hidden = true;
+            voiceDiv.audioElement = audio;
+            voiceDiv.appendChild(audio);
+            
+            // Circular Play/Pause button with SVG icons
+            const playButton = document.createElement('button');
+            playButton.classList.add('voice-play-btn');
+            playButton.setAttribute('aria-label', 'Play voice message');
+            playButton.innerHTML = `
+                <svg class="play-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M3 2l10 6-10 6V2z"/>
+                </svg>
+                <svg class="pause-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="display: none;">
+                    <path d="M4 2h3v12H4V2zm5 0h3v12H9V2z"/>
+                </svg>
+            `;
+            
+            // Canvas waveform
+            const waveformContainer = document.createElement('div');
+            waveformContainer.classList.add('voice-waveform-container');
+            
+            const canvas = document.createElement('canvas');
+            canvas.classList.add('voice-waveform-canvas');
+            canvas.width = 200;
+            canvas.height = 32;
+            canvas.style.cursor = 'pointer';
+            
+            waveformContainer.appendChild(canvas);
+            
+            // Timer label
+            const timerLabel = document.createElement('span');
+            timerLabel.classList.add('voice-timer');
+            timerLabel.textContent = '0:00';
+            
+            // Speed control button (optional)
+            const speedBtn = document.createElement('button');
+            speedBtn.classList.add('voice-speed-btn');
+            speedBtn.textContent = '1x';
+            speedBtn.setAttribute('aria-label', 'Playback speed');
+            let playbackSpeed = 1;
+            
+            // Assemble the UI
+            voiceDiv.appendChild(playButton);
+            voiceDiv.appendChild(waveformContainer);
+            voiceDiv.appendChild(timerLabel);
+            voiceDiv.appendChild(speedBtn);
+            
+            // Generate fake frequency data (20-30 bars, heights 20-80%)
+            const barCount = 25;
+            const frequencies = Array.from({ length: barCount }, () => 
+                Math.random() * 0.6 + 0.2 // Random between 20% and 80%
+            );
+            voiceDiv.frequencies = frequencies;
+            
+            // Draw waveform function
+            const drawWaveform = (progress = 0) => {
+                const ctx = canvas.getContext('2d');
+                const barWidth = 3;
+                const barGap = 2;
+                const totalBarWidth = barWidth + barGap;
+                const maxBarHeight = canvas.height - 4;
+                const startX = 2;
+                const activeColor = isMe ? '#ffffff' : '#0088cc';
+                const inactiveColor = isMe ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                const activeBarIndex = Math.floor((progress / 100) * barCount);
+                
+                frequencies.forEach((freq, index) => {
+                    const x = startX + index * totalBarWidth;
+                    const barHeight = freq * maxBarHeight;
+                    const y = (canvas.height - barHeight) / 2;
+                    
+                    ctx.fillStyle = index <= activeBarIndex ? activeColor : inactiveColor;
+                    ctx.fillRect(x, y, barWidth, barHeight);
+                });
+            };
+            
+            // Initial waveform draw
+            drawWaveform(0);
+            
+            // Get duration when metadata loads
+            audio.addEventListener('loadedmetadata', () => {
+                const duration = Math.floor(audio.duration);
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                timerLabel.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            });
+            
+            // Update timer and waveform during playback
+            const updatePlayback = () => {
+                if (!audio.paused && audio.duration) {
+                    const current = Math.floor(audio.currentTime);
+                    const minutes = Math.floor(current / 60);
+                    const seconds = current % 60;
+                    timerLabel.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    
+                    const progress = (audio.currentTime / audio.duration) * 100;
+                    drawWaveform(progress);
+                    
+                    voiceDiv.animationFrameId = requestAnimationFrame(updatePlayback);
+                } else {
+                    voiceDiv.animationFrameId = null;
+                }
+            };
+            
+            // Play/Pause button click handler
+            playButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (audio.paused) {
+                    // Stop all other voice messages
+                    document.querySelectorAll('.voice-message audio').forEach(a => {
+                        if (a !== audio && !a.paused) {
+                            a.pause();
+                            a.currentTime = 0;
+                            const msgDiv = a.closest('.voice-message');
+                            if (msgDiv) {
+                                const btn = msgDiv.querySelector('.voice-play-btn');
+                                const playIcon = btn?.querySelector('.play-icon');
+                                const pauseIcon = btn?.querySelector('.pause-icon');
+                                const timer = msgDiv.querySelector('.voice-timer');
+                                const canvas = msgDiv.querySelector('.voice-waveform-canvas');
+                                if (playIcon) playIcon.style.display = 'block';
+                                if (pauseIcon) pauseIcon.style.display = 'none';
+                                if (timer) timer.textContent = '0:00';
+                                if (msgDiv.animationFrameId) {
+                                    cancelAnimationFrame(msgDiv.animationFrameId);
+                                    msgDiv.animationFrameId = null;
+                                }
+                                // Reset waveform
+                                if (canvas && msgDiv.frequencies) {
+                                    const ctx = canvas.getContext('2d');
+                                    const barWidth = 3;
+                                    const barGap = 2;
+                                    const totalBarWidth = barWidth + barGap;
+                                    const maxBarHeight = canvas.height - 4;
+                                    const startX = 2;
+                                    const isOther = msgDiv.classList.contains('voice-other');
+                                    const inactiveColor = isOther ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
+                                    
+                                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                                    msgDiv.frequencies.forEach((freq, index) => {
+                                        const x = startX + index * totalBarWidth;
+                                        const barHeight = freq * maxBarHeight;
+                                        const y = (canvas.height - barHeight) / 2;
+                                        ctx.fillStyle = inactiveColor;
+                                        ctx.fillRect(x, y, barWidth, barHeight);
+                                    });
+                                }
+                            }
+                        }
+                    });
+                    
+                    audio.playbackRate = playbackSpeed;
+                    audio.play();
+                    playButton.querySelector('.play-icon').style.display = 'none';
+                    playButton.querySelector('.pause-icon').style.display = 'block';
+                    voiceDiv.animationFrameId = requestAnimationFrame(updatePlayback);
+                } else {
+                    audio.pause();
+                    playButton.querySelector('.play-icon').style.display = 'block';
+                    playButton.querySelector('.pause-icon').style.display = 'none';
+                    if (voiceDiv.animationFrameId) {
+                        cancelAnimationFrame(voiceDiv.animationFrameId);
+                        voiceDiv.animationFrameId = null;
+                    }
+                }
+            });
+            
+            // Seekable waveform - click to jump to position
+            canvas.addEventListener('click', (e) => {
+                if (audio.duration) {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const percent = Math.max(0, Math.min(1, x / canvas.width));
+                    audio.currentTime = percent * audio.duration;
+                    
+                    // Update display immediately
+                    const current = Math.floor(audio.currentTime);
+                    const minutes = Math.floor(current / 60);
+                    const seconds = current % 60;
+                    timerLabel.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    drawWaveform(percent * 100);
+                }
+            });
+            
+            // Speed control toggle
+            speedBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                playbackSpeed = playbackSpeed === 1 ? 2 : 1;
+                speedBtn.textContent = `${playbackSpeed}x`;
+                if (!audio.paused) {
+                    audio.playbackRate = playbackSpeed;
+                }
+            });
+            
+            // Auto-reset when audio ends
+            audio.addEventListener('ended', () => {
+                playButton.querySelector('.play-icon').style.display = 'block';
+                playButton.querySelector('.pause-icon').style.display = 'none';
+                drawWaveform(0);
+                audio.currentTime = 0;
+                timerLabel.textContent = '0:00';
+                if (voiceDiv.animationFrameId) {
+                    cancelAnimationFrame(voiceDiv.animationFrameId);
+                    voiceDiv.animationFrameId = null;
+                }
+            });
+            
+            // Initialize animation frame ID
+            voiceDiv.animationFrameId = null;
+            
+            messageDiv.appendChild(voiceDiv);
+        } else if (data.type === 'image' && data.data) {
+            // Image message from Base64
+            const imageContainer = document.createElement('div');
+            imageContainer.classList.add('message-image-container');
+            
+            // Loading skeleton
+            const skeleton = document.createElement('div');
+            skeleton.classList.add('image-skeleton');
+            imageContainer.appendChild(skeleton);
+            
+            const img = document.createElement('img');
+            img.classList.add('message-image');
+            img.src = data.data;
+            img.alt = 'Shared image';
+            img.loading = 'lazy';
+            
+            img.onload = () => {
+                skeleton.style.display = 'none';
+                img.style.display = 'block';
+            };
+            
+            img.onerror = () => {
+                skeleton.style.display = 'none';
+                const errorDiv = document.createElement('div');
+                errorDiv.classList.add('image-error');
+                errorDiv.textContent = 'Failed to load image';
+                imageContainer.appendChild(errorDiv);
+            };
+            
+            imageContainer.appendChild(img);
+            messageDiv.appendChild(imageContainer);
+        } else if (data.type === 'image-url' && data.url) {
+            // Image message from URL
+            const imageContainer = document.createElement('div');
+            imageContainer.classList.add('message-image-container');
+            
+            // Loading skeleton
+            const skeleton = document.createElement('div');
+            skeleton.classList.add('image-skeleton');
+            imageContainer.appendChild(skeleton);
+            
+            const img = document.createElement('img');
+            img.classList.add('message-image');
+            img.src = data.url;
+            img.alt = 'Shared image';
+            img.loading = 'lazy';
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = () => {
+                skeleton.style.display = 'none';
+                img.style.display = 'block';
+            };
+            
+            img.onerror = () => {
+                skeleton.style.display = 'none';
+                const errorDiv = document.createElement('div');
+                errorDiv.classList.add('image-error');
+                errorDiv.textContent = 'Failed to load image';
+                imageContainer.appendChild(errorDiv);
+            };
+            
+            imageContainer.appendChild(img);
+            messageDiv.appendChild(imageContainer);
+        } else {
+            // Regular text message
+            const text = (data.text || '').trim();
+            const contentDiv = document.createElement('div');
+            contentDiv.classList.add('message-content');
+            
+            // Get emoji layout with Telegram-style detection
+            const emojiLayout = getEmojiLayout(text);
+            
+            if (emojiLayout.isOnly && emojiLayout.count > 0) {
+                // Jumbo emoji message - exact Telegram scaling
+                messageDiv.classList.add('message-jumbo-emoji', emojiLayout.size);
+                contentDiv.classList.add('message-text', 'jumbo-content');
+                
+                // Force Apple Emoji or JoyPixels SVG via CDN
+                // Using Twemoji (Twitter's emoji set) which is high-quality and consistent
+                if (typeof twemoji !== 'undefined') {
+                    contentDiv.innerHTML = twemoji.parse(text, {
+                        folder: 'svg',
+                        ext: '.svg',
+                        base: 'https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/'
+                    });
+                    
+                    // Add telegramPop animation on load (only for single emoji)
+                    if (emojiLayout.count === 1) {
+                        setTimeout(() => {
+                            contentDiv.classList.add('telegram-pop');
+                        }, 10);
+                    }
+                    
+                    // Add click handler for animated emoji support
+                    contentDiv.addEventListener('click', (e) => {
+                        if (e.target.tagName === 'IMG' && e.target.classList.contains('emoji')) {
+                            const emojiCode = getEmojiAssetCode(e.target.alt || text);
+                            renderAnimatedEmoji(emojiCode, e.target);
+                            
+                            // Visual feedback
+                            e.target.style.animation = 'none';
+                            setTimeout(() => {
+                                e.target.style.animation = 'emojiBounce 0.5s ease';
+                            }, 10);
+                        }
+                    });
+                } else {
+                    // Fallback if Twemoji not loaded
+                    contentDiv.innerHTML = escapeHtml(text);
+                    if (emojiLayout.count === 1) {
+                        contentDiv.classList.add('telegram-pop');
+                    }
+                }
+            } else {
+                // Regular text message with inline emojis (1.2rem)
+                contentDiv.classList.add('message-text', 'inline-emoji');
+                const escapedText = escapeHtml(text);
+                
+                // Use Twemoji to render emojis inline
+                if (typeof twemoji !== 'undefined') {
+                    contentDiv.innerHTML = twemoji.parse(escapedText, {
+                        folder: 'svg',
+                        ext: '.svg',
+                        base: 'https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/'
+                    });
+                } else {
+                    contentDiv.innerHTML = escapedText;
+                }
+            }
+            
+            messageDiv.appendChild(contentDiv);
+        }
 
         // Check if message author is leader
         const messageAuthorIsLeader = data.username === currentLeaderUsername;
@@ -521,7 +1067,7 @@ function renderMessage(data) {
         // Context menu for right-click on message bubble
         messageDiv.addEventListener('contextmenu', (e) => {
             e.preventDefault();
-            showMessageContextMenu(e.clientX, e.clientY, data.text, data.username);
+            showMessageContextMenu(e.clientX, e.clientY, data.text || '[Voice Message]', data.username);
         });
         
         // Long-press support for mobile (0.5s hold)
@@ -530,7 +1076,7 @@ function renderMessage(data) {
             longPressTimer = setTimeout(() => {
                 e.preventDefault();
                 const touch = e.touches[0] || e.changedTouches[0];
-                showMessageContextMenu(touch.clientX, touch.clientY, data.text, data.username);
+                showMessageContextMenu(touch.clientX, touch.clientY, data.text || '[Voice Message]', data.username);
             }, 500);
         });
         
@@ -1020,6 +1566,13 @@ if (messageContextKick) {
 function sendMessage() {
     const text = messageInput.value.trim();
     if (text) {
+        // Clear typing status when sending a message
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false;
+            clearTimeout(typingTimeout);
+            socket.emit('typing', { roomCode: currentRoom, isTyping: false });
+        }
+        
         socket.emit('chat message', { text });
         messageInput.value = '';
         messageInput.focus();
@@ -1041,40 +1594,308 @@ messageInput.addEventListener('focus', () => {
 // ============================================================
 // Typing
 // ============================================================
+// ============================================================
+// Typing
+// ============================================================
+let isCurrentlyTyping = false;
+
 messageInput.addEventListener('input', () => {
-    if (!isTyping && username) {
-        isTyping = true;
-        socket.emit('typing');
+    if (!currentRoom || !username) return;
+    
+    // Only send typing event once when user starts typing
+    if (!isCurrentlyTyping) {
+        isCurrentlyTyping = true;
+        socket.emit('typing', { roomCode: currentRoom, isTyping: true });
     }
+
+    // Clear existing timeout
     clearTimeout(typingTimeout);
+    
+    // Set timeout to stop typing after 2 seconds of inactivity
     typingTimeout = setTimeout(() => {
-        isTyping = false;
-        socket.emit('stopTyping');
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false;
+            socket.emit('typing', { roomCode: currentRoom, isTyping: false });
+        }
     }, 2000);
 });
 
-socket.on('userTyping', (user) => {
-    if (user !== username) {
-        typingUsers.add(user);
-        updateTypingUI();
-    }
-});
-
-socket.on('userStopTyping', (user) => {
-    typingUsers.delete(user);
-    updateTypingUI();
-});
-
-function updateTypingUI() {
-    const users = Array.from(typingUsers);
-    if (users.length === 0) {
-        typingIndicator.classList.remove('visible');
+// Receive typing event from others
+socket.on('user typing', (data) => {
+    if (data.username === username) return; // Don't show own typing
+    
+    const typingIndicator = document.getElementById('typing-indicator');
+    const typingText = document.getElementById('typing-text');
+    
+    if (!typingIndicator || !typingText) return;
+    
+    // Update the typing users map
+    if (data.isTyping) {
+        typingUsers.set(data.username, Date.now());
     } else {
-        typingText.textContent = users.length === 1
-            ? `${users[0]} is typing...`
-            : 'Multiple people typing...';
-        typingIndicator.classList.add('visible');
+        typingUsers.delete(data.username);
     }
+    
+    // Update the UI
+    updateTypingIndicator();
+});
+
+// Receive recording event from others
+socket.on('user recording', (data) => {
+    if (data.username === username) return; // Don't show own recording
+    
+    // Update the recording users map
+    if (data.isRecording) {
+        recordingUsers.set(data.username, Date.now());
+    } else {
+        recordingUsers.delete(data.username);
+    }
+    
+    // Update the UI
+    updateTypingIndicator();
+});
+
+function updateTypingIndicator() {
+    const typingIndicator = document.getElementById('typing-indicator');
+    const typingText = document.getElementById('typing-text');
+    
+    if (!typingIndicator || !typingText) {
+        console.warn('Typing indicator elements not found');
+        return;
+    }
+    
+    // Remove users who haven't typed in 3 seconds (cleanup)
+    const now = Date.now();
+    for (const [user, timestamp] of typingUsers.entries()) {
+        if (now - timestamp > 3000) {
+            typingUsers.delete(user);
+        }
+    }
+    
+    // Remove users who haven't recorded in 3 seconds (cleanup)
+    for (const [user, timestamp] of recordingUsers.entries()) {
+        if (now - timestamp > 3000) {
+            recordingUsers.delete(user);
+        }
+    }
+    
+    // Priority: Show recording status first, then typing
+    let text = '';
+    let isRecordingStatus = false;
+    if (recordingUsers.size > 0) {
+        isRecordingStatus = true;
+        const users = Array.from(recordingUsers.keys());
+        if (users.length === 1) {
+            text = `${users[0]} is recording... 🎤`;
+        } else if (users.length === 2) {
+            text = `${users[0]} and ${users[1]} are recording... 🎤`;
+        } else {
+            text = `${users.length} people are recording... 🎤`;
+        }
+    } else if (typingUsers.size > 0) {
+        const users = Array.from(typingUsers.keys());
+        if (users.length === 1) {
+            text = `${users[0]} is typing...`;
+        } else if (users.length === 2) {
+            text = `${users[0]} and ${users[1]} are typing...`;
+        } else {
+            text = `${users.length} people are typing...`;
+        }
+    }
+    
+    // Update display
+    if (text) {
+        // Set text content - use multiple methods to ensure it works
+        typingText.textContent = text;
+        typingText.innerText = text;
+        typingText.innerHTML = text;
+        
+        // Show indicator with multiple methods to ensure visibility
+        typingIndicator.style.display = 'block';
+        typingIndicator.style.visibility = 'visible';
+        typingIndicator.style.opacity = '1';
+        typingIndicator.style.height = 'auto';
+        typingIndicator.style.minHeight = '28px';
+        typingIndicator.classList.add('visible');
+        
+        // Force text visibility
+        typingText.style.display = 'block';
+        typingText.style.visibility = 'visible';
+        typingText.style.opacity = '1';
+        
+        // Show recording status in red, typing in gray
+        if (isRecordingStatus) {
+            typingText.style.color = '#ff4444';
+            typingIndicator.style.borderTop = '1px solid rgba(255, 68, 68, 0.2)';
+        } else {
+            typingText.style.color = '#666';
+            typingIndicator.style.borderTop = '1px solid rgba(0, 0, 0, 0.05)';
+        }
+    } else {
+        // Hide indicator
+        typingIndicator.style.display = 'none';
+        typingIndicator.style.visibility = 'hidden';
+        typingIndicator.style.opacity = '0';
+        typingIndicator.style.height = '0';
+        typingIndicator.classList.remove('visible');
+        typingText.textContent = '';
+        typingText.innerText = '';
+        typingText.innerHTML = '';
+    }
+}
+
+// ============================================================
+// Voice Recording
+// ============================================================
+async function startRecording() {
+    if (isRecording || !currentRoom) return;
+    
+    try {
+        // Request microphone access
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Create MediaRecorder
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+        
+        mediaRecorder.onerror = (error) => {
+            console.error('MediaRecorder error:', error);
+            stopRecording();
+            showError('Recording Error', 'Failed to record audio. Please try again.');
+        };
+        
+        mediaRecorder.onstop = async () => {
+            const recordingDuration = Date.now() - (recordingStartTime || Date.now());
+            
+            // Only send if recording is long enough and has audio data
+            if (recordingDuration >= MIN_RECORDING_DURATION && audioChunks.length > 0) {
+                try {
+                    // Convert audio chunks to blob
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    
+                    // Only send if blob has content
+                    if (audioBlob.size > 0) {
+                        // Convert to Base64 DataURL
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            try {
+                                // Send voice message with full DataURL (data:audio/webm;base64,...)
+                                if (reader.result) {
+                                    socket.emit('chat message', {
+                                        type: 'voice',
+                                        audioData: reader.result, // Full DataURL
+                                        mimeType: 'audio/webm'
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error processing audio:', error);
+                            }
+                        };
+                        reader.onerror = () => {
+                            console.error('FileReader error');
+                        };
+                        reader.readAsDataURL(audioBlob);
+                    }
+                } catch (error) {
+                    console.error('Error creating audio blob:', error);
+                }
+            }
+            
+            // Stop all tracks
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            // Reset state
+            audioChunks = [];
+            recordingStartTime = null;
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        isRecording = true;
+        recordingStartTime = Date.now();
+        
+        // Update UI
+        if (voiceRecordBtn) {
+            voiceRecordBtn.classList.add('recording');
+        }
+        
+        // Emit recording status
+        socket.emit('recording status', {
+            roomCode: currentRoom,
+            isRecording: true
+        });
+        
+    } catch (error) {
+        console.error('Error accessing microphone:', error);
+        showError('Microphone Access', 'Could not access microphone. Please check permissions.');
+    }
+}
+
+function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    
+    // Stop recording (this will trigger onstop which sends the message)
+    if (mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+    
+    isRecording = false;
+    
+    // Update UI immediately
+    if (voiceRecordBtn) {
+        voiceRecordBtn.classList.remove('recording');
+    }
+    
+    // Emit recording status
+    socket.emit('recording status', {
+        roomCode: currentRoom,
+        isRecording: false
+    });
+}
+
+// Voice record button handlers
+if (voiceRecordBtn) {
+    voiceRecordBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        startRecording();
+    });
+    
+    voiceRecordBtn.addEventListener('mouseup', (e) => {
+        e.preventDefault();
+        stopRecording();
+    });
+    
+    voiceRecordBtn.addEventListener('mouseleave', (e) => {
+        e.preventDefault();
+        stopRecording();
+    });
+    
+    // Touch events for mobile
+    voiceRecordBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startRecording();
+    });
+    
+    voiceRecordBtn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        stopRecording();
+    });
+    
+    voiceRecordBtn.addEventListener('touchcancel', (e) => {
+        if (e.cancelable) {
+            e.preventDefault();
+        }
+        stopRecording();
+    });
 }
 
 // ============================================================
@@ -1083,31 +1904,216 @@ function updateTypingUI() {
 const actionBtn = document.getElementById('action-btn');
 const floatingMenu = document.getElementById('floating-menu');
 const menuEmoji = document.getElementById('menu-emoji');
-const emojiPicker = document.getElementById('emoji-picker');
 
-actionBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    floatingMenu.style.display = floatingMenu.style.display === 'flex' ? 'none' : 'flex';
-});
+// Emoji picker functionality
+let isEmojiPickerOpen = false;
 
-menuEmoji.addEventListener('click', (e) => {
-    e.stopPropagation();
-    floatingMenu.style.display = 'none';
-    emojiPicker.style.display = 'grid';
-});
-
-document.addEventListener('click', () => {
-    floatingMenu.style.display = 'none';
-    emojiPicker.style.display = 'none';
-});
-
-emojiPicker.querySelectorAll('span').forEach(span => {
-    span.addEventListener('click', (e) => {
+// Toggle emoji picker
+if (emojiBtn && emojiPicker) {
+    emojiBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        messageInput.value += span.textContent;
-        messageInput.focus();
+        isEmojiPickerOpen = !isEmojiPickerOpen;
+        if (isEmojiPickerOpen) {
+            emojiPicker.style.display = 'flex';
+        } else {
+            emojiPicker.style.display = 'none';
+        }
     });
+    
+    // Category tab switching
+    const emojiTabs = emojiPicker.querySelectorAll('.emoji-tab');
+    const emojiCategories = emojiPicker.querySelectorAll('.emoji-category:not(.recent-emojis)');
+    const recentCategory = document.getElementById('emoji-recent');
+    
+    // Initialize: show smileys by default
+    if (emojiCategories.length > 0) {
+        emojiCategories[0].classList.add('active');
+    }
+    
+    emojiTabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const category = tab.dataset.category;
+            
+            // Update active tab
+            emojiTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            if (category === 'recent') {
+                // Show recent emojis
+                emojiCategories.forEach(cat => cat.classList.remove('active'));
+                if (recentCategory) {
+                    recentCategory.style.display = 'grid';
+                    updateRecentEmojisUI();
+                }
+            } else {
+                // Show selected category
+                if (recentCategory) recentCategory.style.display = 'none';
+                emojiCategories.forEach(cat => {
+                    cat.classList.remove('active');
+                    if (cat.dataset.category === category) {
+                        cat.classList.add('active');
+                    }
+                });
+            }
+        });
+    });
+    
+    // Emoji item click - insert at cursor position
+    emojiPicker.addEventListener('click', (e) => {
+        const emojiItem = e.target.closest('.emoji-item');
+        if (emojiItem) {
+            e.stopPropagation();
+            const emoji = emojiItem.textContent.trim() || emojiItem.dataset.emoji;
+            if (emoji) {
+                insertEmojiAtCursor(emoji);
+            }
+        }
+    });
+    
+    // Initialize recent emojis on picker open
+    emojiBtn.addEventListener('click', () => {
+        if (isEmojiPickerOpen) {
+            updateRecentEmojisUI();
+        }
+    });
+}
+
+// Recent emojis management with frequency tracking (top 30)
+const RECENT_EMOJIS_KEY = 'glchat_recent_emojis';
+const MAX_RECENT_EMOJIS = 30;
+
+function getRecentEmojis() {
+    try {
+        const stored = localStorage.getItem(RECENT_EMOJIS_KEY);
+        if (!stored) return [];
+        
+        const data = JSON.parse(stored);
+        // Return array of { emoji, count } sorted by frequency
+        return Array.isArray(data) ? data : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function addRecentEmoji(emoji) {
+    try {
+        let recent = getRecentEmojis();
+        
+        // Find existing emoji or create new entry
+        const existingIndex = recent.findIndex(e => e.emoji === emoji);
+        
+        if (existingIndex >= 0) {
+            // Increment frequency
+            recent[existingIndex].count++;
+            // Move to front (most recently used)
+            const item = recent.splice(existingIndex, 1)[0];
+            recent.unshift(item);
+        } else {
+            // Add new emoji with count 1
+            recent.unshift({ emoji: emoji, count: 1 });
+        }
+        
+        // Sort by frequency (count), then by recency
+        recent.sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return recent.indexOf(a) - recent.indexOf(b);
+        });
+        
+        // Keep only top MAX_RECENT_EMOJIS
+        recent = recent.slice(0, MAX_RECENT_EMOJIS);
+        
+        localStorage.setItem(RECENT_EMOJIS_KEY, JSON.stringify(recent));
+        updateRecentEmojisUI();
+    } catch (e) {
+        console.error('Failed to save recent emoji:', e);
+    }
+}
+
+function updateRecentEmojisUI() {
+    const recentContainer = document.getElementById('emoji-recent');
+    if (!recentContainer) return;
+    
+    const recent = getRecentEmojis();
+    if (recent.length === 0) {
+        recentContainer.style.display = 'none';
+        return;
+    }
+    
+    recentContainer.style.display = 'grid';
+    // Display emojis ordered by frequency
+    recentContainer.innerHTML = recent.map(item => {
+        const emoji = typeof item === 'string' ? item : item.emoji;
+        return `<span class="emoji-item" data-emoji="${emoji}">${emoji}</span>`;
+    }).join('');
+    
+    // Add click handlers
+    recentContainer.querySelectorAll('.emoji-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const emoji = item.dataset.emoji;
+            insertEmojiAtCursor(emoji);
+            messageInput.focus();
+        });
+    });
+}
+
+// Zero-latency emoji insertion at cursor position
+function insertEmojiAtCursor(emoji) {
+    const input = messageInput;
+    if (!input) return;
+    
+    // Get current cursor position
+    const start = input.selectionStart || 0;
+    const end = input.selectionEnd || 0;
+    const text = input.value;
+    
+    // Insert emoji at cursor position
+    input.value = text.substring(0, start) + emoji + text.substring(end);
+    
+    // Set cursor position after inserted emoji (zero-latency)
+    const newPosition = start + emoji.length;
+    input.setSelectionRange(newPosition, newPosition);
+    
+    // Maintain focus for keyboard input
+    input.focus();
+    
+    // Trigger input event for any listeners (typing indicator, etc.)
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    
+    // Save to recent emojis
+    addRecentEmoji(emoji);
+}
+
+// Close emoji picker when clicking outside
+document.addEventListener('click', (e) => {
+    if (emojiPicker && isEmojiPickerOpen) {
+        if (!emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
+            emojiPicker.style.display = 'none';
+            isEmojiPickerOpen = false;
+        }
+    }
+    floatingMenu.style.display = 'none';
 });
+
+// Legacy action menu emoji button
+if (menuEmoji) {
+    menuEmoji.addEventListener('click', (e) => {
+        e.stopPropagation();
+        floatingMenu.style.display = 'none';
+        if (emojiPicker) {
+            emojiPicker.style.display = 'flex';
+            isEmojiPickerOpen = true;
+        }
+    });
+}
+
+if (actionBtn) {
+    actionBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        floatingMenu.style.display = floatingMenu.style.display === 'flex' ? 'none' : 'flex';
+    });
+}
 
 // ============================================================
 // Mobile Menu Toggle
@@ -1145,9 +2151,14 @@ window.addEventListener('resize', () => {
     // Update mobile game UI visibility
     const mobileRoleBadge = document.getElementById('mobile-role-badge');
     const mobileGameActions = document.getElementById('mobile-game-actions');
-    if (window.innerWidth <= 768 && isMafiaRoom) {
-        if (mobileRoleBadge && myRole) {
+    if (window.innerWidth <= 768 && isMafiaRoom && myRole) {
+        if (mobileRoleBadge) {
             mobileRoleBadge.style.display = 'block';
+            const mobileRoleText = document.getElementById('mobile-role-text');
+            if (mobileRoleText) {
+                mobileRoleText.textContent = `${ROLE_ICONS[myRole] || '🎭'} ${myRole}`;
+                mobileRoleText.style.color = ROLE_COLORS[myRole] || '#333';
+            }
         }
         if (mobileGameActions) {
             mobileGameActions.style.display = 'flex';
