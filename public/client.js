@@ -218,7 +218,7 @@ socket.on('roomJoined', (data) => {
     gameState = 'LOBBY';
     myRole = null;
     leaderActivated = false; // Reset leader activation on room join
-    
+
     // Clear typing and recording users when joining a new room
     typingUsers.clear();
     recordingUsers.clear();
@@ -236,7 +236,7 @@ socket.on('roomJoined', (data) => {
         voiceRecordBtn.classList.remove('recording');
     }
     updateTypingIndicator(); // Hide indicator
-    
+
     // Initialize leader info from server
     if (data.currentLeaderId && data.currentLeaderUsername) {
         currentLeaderUsername = data.currentLeaderUsername;
@@ -259,7 +259,7 @@ socket.on('roomJoined', (data) => {
     const mobileRoleBadge = document.getElementById('mobile-role-badge');
     const mobileGameActions = document.getElementById('mobile-game-actions');
     const isMobile = window.innerWidth <= 768;
-    
+
     if (isMafiaRoom) {
         // MAFIA Room: Show game UI
         if (roleDisplay) roleDisplay.style.display = 'none';
@@ -269,7 +269,7 @@ socket.on('roomJoined', (data) => {
         if (roomNameDisplay) roomNameDisplay.textContent = isSpectator ? 'Mafia Game 👁️' : 'Mafia Game';
         if (membersTitle) membersTitle.textContent = 'Players';
         updatePhaseUI('LOBBY');
-        
+
         // Show mobile role badge and game actions (only on mobile)
         if (isMobile) {
             if (mobileRoleBadge) {
@@ -298,7 +298,7 @@ socket.on('roomJoined', (data) => {
         // Hide timer display in standard mode
         const timerDisplay = document.getElementById('timer-display');
         if (timerDisplay) timerDisplay.style.display = 'none';
-        
+
         // Hide mobile game UI
         if (mobileRoleBadge) mobileRoleBadge.style.display = 'none';
         if (mobileGameActions) mobileGameActions.style.display = 'none';
@@ -369,7 +369,7 @@ socket.on('roleAssigned', (data) => {
     roleDisplay.style.display = 'block';
     roleText.textContent = `${ROLE_ICONS[data.role]} ${data.role}`;
     roleText.style.color = ROLE_COLORS[data.role];
-    
+
     // Update mobile role badge (only on mobile)
     const mobileRoleBadge = document.getElementById('mobile-role-badge');
     const mobileRoleText = document.getElementById('mobile-role-text');
@@ -475,27 +475,27 @@ function getEmojiLayout(text) {
     if (!text || text.trim().length === 0) {
         return { isOnly: false, count: 0, hasText: false, size: 'inline' };
     }
-    
+
     const trimmed = text.trim();
-    
+
     // Comprehensive Unicode emoji regex pattern
     // Covers: Emoticons, Symbols, Pictographs, Transport, Flags, Modifiers, etc.
     const emojiPattern = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F900}-\u{1F9FF}]|[\u{1FA00}-\u{1FA6F}]|[\u{1FA70}-\u{1FAFF}]|[\u{2190}-\u{21FF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{3030}-\u{303F}]|[\u{FE00}-\u{FE0F}]|[\u{200D}]|[\u{20E3}]|[\u{FE0F}]/gu;
-    
+
     // Find all emoji sequences (handles multi-character emojis like flags, skin tones)
     const emojiMatches = trimmed.match(emojiPattern);
-    
+
     // Remove all emojis and whitespace to check for remaining text
     const textWithoutEmojis = trimmed.replace(emojiPattern, '').replace(/\s/g, '');
     const hasText = textWithoutEmojis.length > 0;
-    
+
     if (!emojiMatches) {
         return { isOnly: false, count: 0, hasText: hasText, size: 'inline' };
     }
-    
+
     // Count distinct emoji sequences (handles zero-width joiners, variation selectors)
     const emojiCount = countEmojiSequences(trimmed);
-    
+
     // Determine size based on Telegram's exact scaling rules
     let size = 'inline';
     if (!hasText && emojiCount > 0) {
@@ -509,7 +509,7 @@ function getEmojiLayout(text) {
             size = 'inline'; // 4+ emojis or with text: 1.2rem
         }
     }
-    
+
     return {
         isOnly: !hasText && emojiCount > 0,
         count: emojiCount,
@@ -523,7 +523,7 @@ function countEmojiSequences(text) {
     // Split by spaces first
     const parts = text.trim().split(/\s+/);
     let count = 0;
-    
+
     for (const part of parts) {
         // Use regex to find emoji sequences
         // This handles flags (2 regional indicators), skin tones, zero-width joiners
@@ -533,7 +533,7 @@ function countEmojiSequences(text) {
             count += matches.length;
         }
     }
-    
+
     return count;
 }
 
@@ -561,7 +561,7 @@ function renderAnimatedEmoji(emojiCode, targetElement) {
     if (typeof lottie !== 'undefined') {
         // Check if this emoji has an animation file
         const hasAnimation = checkEmojiHasAnimation(emojiCode);
-        
+
         if (hasAnimation) {
             try {
                 // Create container for animation
@@ -571,7 +571,7 @@ function renderAnimatedEmoji(emojiCode, targetElement) {
                 container.style.width = targetElement.offsetWidth + 'px';
                 container.style.height = targetElement.offsetHeight + 'px';
                 container.style.pointerEvents = 'none';
-                
+
                 // Load animation
                 const animation = lottie.loadAnimation({
                     container: container,
@@ -580,26 +580,26 @@ function renderAnimatedEmoji(emojiCode, targetElement) {
                     autoplay: true,
                     path: `https://cdn.jsdelivr.net/npm/telegram-animated-emojis@latest/${emojiCode}.json`
                 });
-                
+
                 // Position container over emoji
                 const rect = targetElement.getBoundingClientRect();
                 container.style.left = rect.left + 'px';
                 container.style.top = rect.top + 'px';
                 document.body.appendChild(container);
-                
+
                 // Clean up after animation
                 setTimeout(() => {
                     animation.destroy();
                     container.remove();
                 }, 2000);
-                
+
                 return animation;
             } catch (error) {
                 console.warn(`[Lottie] Failed to load animation for ${emojiCode}:`, error);
             }
         }
     }
-    
+
     console.log(`[Lottie] Animation placeholder for emoji: ${emojiCode}`);
     return null;
 }
@@ -616,7 +616,7 @@ function checkEmojiHasAnimation(emojiCode) {
         '1F628', '1F629', '1F62A', '1F62B', '1F62C', '1F62D', '1F62E', '1F62F',
         '1F630', '1F631', '1F632', '1F633'
     ];
-    
+
     return animatedEmojis.includes(emojiCode.toUpperCase());
 }
 
@@ -631,7 +631,7 @@ function renderMessage(data) {
 
     const wrapper = document.createElement('div');
     wrapper.classList.add('message-wrapper');
-    
+
     // Add alignment class to container
     if (data.username !== 'SYSTEM') {
         const isMe = data.username === username || data.username.includes(username);
@@ -659,20 +659,20 @@ function renderMessage(data) {
         const usernameRow = document.createElement('div');
         usernameRow.classList.add('message-username-row');
 
-            // Avatar next to username
-            if (data.avatarUrl) {
-                const avatarImg = document.createElement('img');
-                avatarImg.src = data.avatarUrl;
-                avatarImg.classList.add('message-avatar');
-                avatarImg.onerror = function () { this.src = getFallbackAvatar(data.username); };
-                
-                // Check if user is leader for golden styling
-                if (data.username === currentLeaderUsername && leaderActivated) {
-                    avatarImg.classList.add('leader-avatar');
-                }
-                
-                usernameRow.appendChild(avatarImg);
+        // Avatar next to username
+        if (data.avatarUrl) {
+            const avatarImg = document.createElement('img');
+            avatarImg.src = data.avatarUrl;
+            avatarImg.classList.add('message-avatar');
+            avatarImg.onerror = function () { this.src = getFallbackAvatar(data.username); };
+
+            // Check if user is leader for golden styling
+            if (data.username === currentLeaderUsername && leaderActivated) {
+                avatarImg.classList.add('leader-avatar');
             }
+
+            usernameRow.appendChild(avatarImg);
+        }
 
         const usernameSpan = document.createElement('span');
         usernameSpan.classList.add('username');
@@ -705,7 +705,7 @@ function renderMessage(data) {
             voiceDiv.classList.add('voice-message');
             voiceDiv.classList.add(isMe ? 'voice-self' : 'voice-other');
             voiceDiv.dataset.messageId = data.id;
-            
+
             // Hidden audio element
             const audio = document.createElement('audio');
             audio.src = data.audioData;
@@ -714,7 +714,7 @@ function renderMessage(data) {
             audio.hidden = true;
             voiceDiv.audioElement = audio;
             voiceDiv.appendChild(audio);
-            
+
             // Circular Play/Pause button with SVG icons
             const playButton = document.createElement('button');
             playButton.classList.add('voice-play-btn');
@@ -727,44 +727,44 @@ function renderMessage(data) {
                     <path d="M4 2h3v12H4V2zm5 0h3v12H9V2z"/>
                 </svg>
             `;
-            
+
             // Canvas waveform
             const waveformContainer = document.createElement('div');
             waveformContainer.classList.add('voice-waveform-container');
-            
+
             const canvas = document.createElement('canvas');
             canvas.classList.add('voice-waveform-canvas');
             canvas.width = 200;
             canvas.height = 32;
             canvas.style.cursor = 'pointer';
-            
+
             waveformContainer.appendChild(canvas);
-            
+
             // Timer label
             const timerLabel = document.createElement('span');
             timerLabel.classList.add('voice-timer');
             timerLabel.textContent = '0:00';
-            
+
             // Speed control button (optional)
             const speedBtn = document.createElement('button');
             speedBtn.classList.add('voice-speed-btn');
             speedBtn.textContent = '1x';
             speedBtn.setAttribute('aria-label', 'Playback speed');
             let playbackSpeed = 1;
-            
+
             // Assemble the UI
             voiceDiv.appendChild(playButton);
             voiceDiv.appendChild(waveformContainer);
             voiceDiv.appendChild(timerLabel);
             voiceDiv.appendChild(speedBtn);
-            
+
             // Generate fake frequency data (20-30 bars, heights 20-80%)
             const barCount = 25;
-            const frequencies = Array.from({ length: barCount }, () => 
+            const frequencies = Array.from({ length: barCount }, () =>
                 Math.random() * 0.6 + 0.2 // Random between 20% and 80%
             );
             voiceDiv.frequencies = frequencies;
-            
+
             // Draw waveform function
             const drawWaveform = (progress = 0) => {
                 const ctx = canvas.getContext('2d');
@@ -775,24 +775,24 @@ function renderMessage(data) {
                 const startX = 2;
                 const activeColor = isMe ? '#ffffff' : '#0088cc';
                 const inactiveColor = isMe ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
-                
+
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
+
                 const activeBarIndex = Math.floor((progress / 100) * barCount);
-                
+
                 frequencies.forEach((freq, index) => {
                     const x = startX + index * totalBarWidth;
                     const barHeight = freq * maxBarHeight;
                     const y = (canvas.height - barHeight) / 2;
-                    
+
                     ctx.fillStyle = index <= activeBarIndex ? activeColor : inactiveColor;
                     ctx.fillRect(x, y, barWidth, barHeight);
                 });
             };
-            
+
             // Initial waveform draw
             drawWaveform(0);
-            
+
             // Get duration when metadata loads
             audio.addEventListener('loadedmetadata', () => {
                 const duration = Math.floor(audio.duration);
@@ -800,7 +800,7 @@ function renderMessage(data) {
                 const seconds = duration % 60;
                 timerLabel.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
             });
-            
+
             // Update timer and waveform during playback
             const updatePlayback = () => {
                 if (!audio.paused && audio.duration) {
@@ -808,16 +808,16 @@ function renderMessage(data) {
                     const minutes = Math.floor(current / 60);
                     const seconds = current % 60;
                     timerLabel.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                    
+
                     const progress = (audio.currentTime / audio.duration) * 100;
                     drawWaveform(progress);
-                    
+
                     voiceDiv.animationFrameId = requestAnimationFrame(updatePlayback);
                 } else {
                     voiceDiv.animationFrameId = null;
                 }
             };
-            
+
             // Play/Pause button click handler
             playButton.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -851,7 +851,7 @@ function renderMessage(data) {
                                     const startX = 2;
                                     const isOther = msgDiv.classList.contains('voice-other');
                                     const inactiveColor = isOther ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.3)';
-                                    
+
                                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                                     msgDiv.frequencies.forEach((freq, index) => {
                                         const x = startX + index * totalBarWidth;
@@ -864,7 +864,7 @@ function renderMessage(data) {
                             }
                         }
                     });
-                    
+
                     audio.playbackRate = playbackSpeed;
                     audio.play();
                     playButton.querySelector('.play-icon').style.display = 'none';
@@ -880,7 +880,7 @@ function renderMessage(data) {
                     }
                 }
             });
-            
+
             // Seekable waveform - click to jump to position
             canvas.addEventListener('click', (e) => {
                 if (audio.duration) {
@@ -888,7 +888,7 @@ function renderMessage(data) {
                     const x = e.clientX - rect.left;
                     const percent = Math.max(0, Math.min(1, x / canvas.width));
                     audio.currentTime = percent * audio.duration;
-                    
+
                     // Update display immediately
                     const current = Math.floor(audio.currentTime);
                     const minutes = Math.floor(current / 60);
@@ -897,7 +897,7 @@ function renderMessage(data) {
                     drawWaveform(percent * 100);
                 }
             });
-            
+
             // Speed control toggle
             speedBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -907,7 +907,7 @@ function renderMessage(data) {
                     audio.playbackRate = playbackSpeed;
                 }
             });
-            
+
             // Auto-reset when audio ends
             audio.addEventListener('ended', () => {
                 playButton.querySelector('.play-icon').style.display = 'block';
@@ -920,32 +920,32 @@ function renderMessage(data) {
                     voiceDiv.animationFrameId = null;
                 }
             });
-            
+
             // Initialize animation frame ID
             voiceDiv.animationFrameId = null;
-            
+
             messageDiv.appendChild(voiceDiv);
         } else if (data.type === 'image' && data.data) {
             // Image message from Base64
             const imageContainer = document.createElement('div');
             imageContainer.classList.add('message-image-container');
-            
+
             // Loading skeleton
             const skeleton = document.createElement('div');
             skeleton.classList.add('image-skeleton');
             imageContainer.appendChild(skeleton);
-            
+
             const img = document.createElement('img');
             img.classList.add('message-image');
             img.src = data.data;
             img.alt = 'Shared image';
             img.loading = 'lazy';
-            
+
             img.onload = () => {
                 skeleton.style.display = 'none';
                 img.style.display = 'block';
             };
-            
+
             img.onerror = () => {
                 skeleton.style.display = 'none';
                 const errorDiv = document.createElement('div');
@@ -953,31 +953,31 @@ function renderMessage(data) {
                 errorDiv.textContent = 'Failed to load image';
                 imageContainer.appendChild(errorDiv);
             };
-            
+
             imageContainer.appendChild(img);
             messageDiv.appendChild(imageContainer);
         } else if (data.type === 'image-url' && data.url) {
             // Image message from URL
             const imageContainer = document.createElement('div');
             imageContainer.classList.add('message-image-container');
-            
+
             // Loading skeleton
             const skeleton = document.createElement('div');
             skeleton.classList.add('image-skeleton');
             imageContainer.appendChild(skeleton);
-            
+
             const img = document.createElement('img');
             img.classList.add('message-image');
             img.src = data.url;
             img.alt = 'Shared image';
             img.loading = 'lazy';
             img.crossOrigin = 'anonymous';
-            
+
             img.onload = () => {
                 skeleton.style.display = 'none';
                 img.style.display = 'block';
             };
-            
+
             img.onerror = () => {
                 skeleton.style.display = 'none';
                 const errorDiv = document.createElement('div');
@@ -985,7 +985,7 @@ function renderMessage(data) {
                 errorDiv.textContent = 'Failed to load image';
                 imageContainer.appendChild(errorDiv);
             };
-            
+
             imageContainer.appendChild(img);
             messageDiv.appendChild(imageContainer);
         } else {
@@ -993,15 +993,15 @@ function renderMessage(data) {
             const text = (data.text || '').trim();
             const contentDiv = document.createElement('div');
             contentDiv.classList.add('message-content');
-            
+
             // Get emoji layout with Telegram-style detection
             const emojiLayout = getEmojiLayout(text);
-            
+
             if (emojiLayout.isOnly && emojiLayout.count > 0) {
                 // Jumbo emoji message - exact Telegram scaling
                 messageDiv.classList.add('message-jumbo-emoji', emojiLayout.size);
                 contentDiv.classList.add('message-text', 'jumbo-content');
-                
+
                 // Force Apple Emoji or JoyPixels SVG via CDN
                 // Using Twemoji (Twitter's emoji set) which is high-quality and consistent
                 if (typeof twemoji !== 'undefined') {
@@ -1010,20 +1010,20 @@ function renderMessage(data) {
                         ext: '.svg',
                         base: 'https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/'
                     });
-                    
+
                     // Add telegramPop animation on load (only for single emoji)
                     if (emojiLayout.count === 1) {
                         setTimeout(() => {
                             contentDiv.classList.add('telegram-pop');
                         }, 10);
                     }
-                    
+
                     // Add click handler for animated emoji support
                     contentDiv.addEventListener('click', (e) => {
                         if (e.target.tagName === 'IMG' && e.target.classList.contains('emoji')) {
                             const emojiCode = getEmojiAssetCode(e.target.alt || text);
                             renderAnimatedEmoji(emojiCode, e.target);
-                            
+
                             // Visual feedback
                             e.target.style.animation = 'none';
                             setTimeout(() => {
@@ -1042,7 +1042,7 @@ function renderMessage(data) {
                 // Regular text message with inline emojis (1.2rem)
                 contentDiv.classList.add('message-text', 'inline-emoji');
                 const escapedText = escapeHtml(text);
-                
+
                 // Use Twemoji to render emojis inline
                 if (typeof twemoji !== 'undefined') {
                     contentDiv.innerHTML = twemoji.parse(escapedText, {
@@ -1054,7 +1054,7 @@ function renderMessage(data) {
                     contentDiv.innerHTML = escapedText;
                 }
             }
-            
+
             messageDiv.appendChild(contentDiv);
         }
 
@@ -1069,7 +1069,7 @@ function renderMessage(data) {
             e.preventDefault();
             showMessageContextMenu(e.clientX, e.clientY, data.text || '[Voice Message]', data.username);
         });
-        
+
         // Long-press support for mobile (0.5s hold)
         let longPressTimer;
         messageDiv.addEventListener('touchstart', (e) => {
@@ -1079,11 +1079,11 @@ function renderMessage(data) {
                 showMessageContextMenu(touch.clientX, touch.clientY, data.text || '[Voice Message]', data.username);
             }, 500);
         });
-        
+
         messageDiv.addEventListener('touchend', () => {
             clearTimeout(longPressTimer);
         });
-        
+
         messageDiv.addEventListener('touchmove', () => {
             clearTimeout(longPressTimer);
         });
@@ -1117,14 +1117,14 @@ function removeAllLeaderStyling() {
             usernameSpan.textContent = usernameSpan.textContent.replace(' (Leader)', '');
         }
     });
-    
+
     // Remove leader styling from all sidebar usernames
     const playerNames = document.querySelectorAll('.player-name');
     playerNames.forEach(nameSpan => {
         nameSpan.classList.remove('leader-username', 'is-leader');
         nameSpan.textContent = nameSpan.textContent.replace(' (Leader)', '');
     });
-    
+
     // Remove leader styling from avatars
     const avatars = document.querySelectorAll('.message-avatar, .user-list-avatar');
     avatars.forEach(avatar => {
@@ -1134,7 +1134,7 @@ function removeAllLeaderStyling() {
 
 function applyLeaderStyling(leaderUsername) {
     if (!leaderUsername || !leaderActivated) return;
-    
+
     // Apply to message usernames
     const containers = document.querySelectorAll('.message-container');
     containers.forEach(container => {
@@ -1147,7 +1147,7 @@ function applyLeaderStyling(leaderUsername) {
             }
         }
     });
-    
+
     // Apply to sidebar usernames
     const playerNames = document.querySelectorAll('.player-name');
     playerNames.forEach(nameSpan => {
@@ -1160,7 +1160,7 @@ function applyLeaderStyling(leaderUsername) {
             }
         }
     });
-    
+
     // Apply to avatars
     const containersWithAvatar = document.querySelectorAll('.message-container');
     containersWithAvatar.forEach(container => {
@@ -1170,7 +1170,7 @@ function applyLeaderStyling(leaderUsername) {
             avatar.classList.add('leader-avatar');
         }
     });
-    
+
     const sidebarItems = document.querySelectorAll('.player-item');
     sidebarItems.forEach(item => {
         const nameSpan = item.querySelector('.player-name');
@@ -1205,19 +1205,19 @@ socket.on('message_deleted', (data) => {
 socket.on('leader_updated', (data) => {
     // Remove leader styling from everyone first
     removeAllLeaderStyling();
-    
+
     if (data.leaderId && data.leaderUsername) {
         // Set new leader
         currentLeaderUsername = data.leaderUsername;
         leaderActivated = true;
-        
+
         // Update isLeader status if this user is the leader
         if (data.leaderUsername === username) {
             isLeader = true;
         } else {
             isLeader = false;
         }
-        
+
         // Apply leader styling to the new leader
         applyLeaderStyling(data.leaderUsername);
     } else {
@@ -1255,11 +1255,11 @@ socket.on('online users', (data) => {
     const users = data.users || [];
 
     userList.innerHTML = '';
-    
+
     // Track current leader username and update if changed
     const leaderUser = users.find(u => u.isLeader);
     const newLeaderUsername = leaderUser ? leaderUser.username : '';
-    
+
     // If leader changed, update all message usernames
     if (newLeaderUsername !== currentLeaderUsername) {
         currentLeaderUsername = newLeaderUsername;
@@ -1318,7 +1318,7 @@ socket.on('online users', (data) => {
         } else {
             nameSpan.textContent = user.username;
         }
-        
+
         // Add context menu for leaders (non-MAFIA rooms only)
         if (!isMafiaRoom && isLeader && user.username !== username) {
             nameSpan.style.cursor = 'pointer';
@@ -1375,16 +1375,16 @@ function showContextMenu(x, y, text) {
 function showMessageContextMenu(x, y, text, messageAuthor) {
     const messageContextMenu = document.getElementById('message-context-menu');
     if (!messageContextMenu) return;
-    
+
     selectedText = text;
     messageContextMenu.dataset.messageAuthor = messageAuthor;
-    
+
     // Find the message container to get message ID
     const messageContainer = document.elementFromPoint(x, y)?.closest('.message-container');
     if (messageContainer) {
         messageContextMenu.dataset.messageId = messageContainer.id.replace('msg-', '');
     }
-    
+
     // Show/hide options based on permissions
     const copyBtn = document.getElementById('ctx-msg-copy');
     const deleteMeBtn = document.getElementById('ctx-msg-delete-me');
@@ -1394,17 +1394,17 @@ function showMessageContextMenu(x, y, text, messageAuthor) {
     const kickBtn = document.getElementById('ctx-msg-kick');
     const divider1 = document.getElementById('ctx-msg-divider-1');
     const divider2 = document.getElementById('ctx-msg-divider-2');
-    
+
     // Always show copy and delete for me
     if (copyBtn) copyBtn.style.display = 'flex';
     if (deleteMeBtn) deleteMeBtn.style.display = 'flex';
-    
+
     // Show delete for everyone only if user is author or leader
     const canDeleteForEveryone = (messageAuthor === username) || (isLeader && leaderActivated);
     if (deleteAllBtn) {
         deleteAllBtn.style.display = canDeleteForEveryone ? 'flex' : 'none';
     }
-    
+
     // Show leader actions only if user is leader and activated, and not clicking own message
     if (isLeader && leaderActivated && !isMafiaRoom && messageAuthor !== username) {
         if (muteBtn) muteBtn.style.display = 'flex';
@@ -1417,7 +1417,7 @@ function showMessageContextMenu(x, y, text, messageAuthor) {
         if (kickBtn) kickBtn.style.display = 'none';
         if (divider2) divider2.style.display = 'none';
     }
-    
+
     messageContextMenu.style.display = 'block';
     messageContextMenu.style.left = `${x}px`;
     messageContextMenu.style.top = `${y}px`;
@@ -1426,7 +1426,7 @@ function showMessageContextMenu(x, y, text, messageAuthor) {
 function showUserContextMenu(x, y, targetUsername) {
     const userContextMenu = document.getElementById('user-context-menu');
     if (!userContextMenu) return;
-    
+
     userContextMenu.dataset.targetUsername = targetUsername;
     userContextMenu.style.display = 'block';
     userContextMenu.style.left = `${x}px`;
@@ -1572,7 +1572,7 @@ function sendMessage() {
             clearTimeout(typingTimeout);
             socket.emit('typing', { roomCode: currentRoom, isTyping: false });
         }
-        
+
         socket.emit('chat message', { text });
         messageInput.value = '';
         messageInput.focus();
@@ -1601,7 +1601,7 @@ let isCurrentlyTyping = false;
 
 messageInput.addEventListener('input', () => {
     if (!currentRoom || !username) return;
-    
+
     // Only send typing event once when user starts typing
     if (!isCurrentlyTyping) {
         isCurrentlyTyping = true;
@@ -1610,7 +1610,7 @@ messageInput.addEventListener('input', () => {
 
     // Clear existing timeout
     clearTimeout(typingTimeout);
-    
+
     // Set timeout to stop typing after 2 seconds of inactivity
     typingTimeout = setTimeout(() => {
         if (isCurrentlyTyping) {
@@ -1623,19 +1623,19 @@ messageInput.addEventListener('input', () => {
 // Receive typing event from others
 socket.on('user typing', (data) => {
     if (data.username === username) return; // Don't show own typing
-    
+
     const typingIndicator = document.getElementById('typing-indicator');
     const typingText = document.getElementById('typing-text');
-    
+
     if (!typingIndicator || !typingText) return;
-    
+
     // Update the typing users map
     if (data.isTyping) {
         typingUsers.set(data.username, Date.now());
     } else {
         typingUsers.delete(data.username);
     }
-    
+
     // Update the UI
     updateTypingIndicator();
 });
@@ -1643,14 +1643,14 @@ socket.on('user typing', (data) => {
 // Receive recording event from others
 socket.on('user recording', (data) => {
     if (data.username === username) return; // Don't show own recording
-    
+
     // Update the recording users map
     if (data.isRecording) {
         recordingUsers.set(data.username, Date.now());
     } else {
         recordingUsers.delete(data.username);
     }
-    
+
     // Update the UI
     updateTypingIndicator();
 });
@@ -1658,12 +1658,12 @@ socket.on('user recording', (data) => {
 function updateTypingIndicator() {
     const typingIndicator = document.getElementById('typing-indicator');
     const typingText = document.getElementById('typing-text');
-    
+
     if (!typingIndicator || !typingText) {
         console.warn('Typing indicator elements not found');
         return;
     }
-    
+
     // Remove users who haven't typed in 3 seconds (cleanup)
     const now = Date.now();
     for (const [user, timestamp] of typingUsers.entries()) {
@@ -1671,14 +1671,14 @@ function updateTypingIndicator() {
             typingUsers.delete(user);
         }
     }
-    
+
     // Remove users who haven't recorded in 3 seconds (cleanup)
     for (const [user, timestamp] of recordingUsers.entries()) {
         if (now - timestamp > 3000) {
             recordingUsers.delete(user);
         }
     }
-    
+
     // Priority: Show recording status first, then typing
     let text = '';
     let isRecordingStatus = false;
@@ -1702,14 +1702,14 @@ function updateTypingIndicator() {
             text = `${users.length} people are typing...`;
         }
     }
-    
+
     // Update display
     if (text) {
         // Set text content - use multiple methods to ensure it works
         typingText.textContent = text;
         typingText.innerText = text;
         typingText.innerHTML = text;
-        
+
         // Show indicator with multiple methods to ensure visibility
         typingIndicator.style.display = 'block';
         typingIndicator.style.visibility = 'visible';
@@ -1717,12 +1717,12 @@ function updateTypingIndicator() {
         typingIndicator.style.height = 'auto';
         typingIndicator.style.minHeight = '28px';
         typingIndicator.classList.add('visible');
-        
+
         // Force text visibility
         typingText.style.display = 'block';
         typingText.style.visibility = 'visible';
         typingText.style.opacity = '1';
-        
+
         // Show recording status in red, typing in gray
         if (isRecordingStatus) {
             typingText.style.color = '#ff4444';
@@ -1749,36 +1749,36 @@ function updateTypingIndicator() {
 // ============================================================
 async function startRecording() {
     if (isRecording || !currentRoom) return;
-    
+
     try {
         // Request microphone access
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
+
         // Create MediaRecorder
         mediaRecorder = new MediaRecorder(stream);
         audioChunks = [];
-        
+
         mediaRecorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
                 audioChunks.push(event.data);
             }
         };
-        
+
         mediaRecorder.onerror = (error) => {
             console.error('MediaRecorder error:', error);
             stopRecording();
             showError('Recording Error', 'Failed to record audio. Please try again.');
         };
-        
+
         mediaRecorder.onstop = async () => {
             const recordingDuration = Date.now() - (recordingStartTime || Date.now());
-            
+
             // Only send if recording is long enough and has audio data
             if (recordingDuration >= MIN_RECORDING_DURATION && audioChunks.length > 0) {
                 try {
                     // Convert audio chunks to blob
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    
+
                     // Only send if blob has content
                     if (audioBlob.size > 0) {
                         // Convert to Base64 DataURL
@@ -1806,34 +1806,34 @@ async function startRecording() {
                     console.error('Error creating audio blob:', error);
                 }
             }
-            
+
             // Stop all tracks
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
             }
-            
+
             // Reset state
             audioChunks = [];
             recordingStartTime = null;
         };
-        
+
         // Start recording
         mediaRecorder.start();
         isRecording = true;
         recordingStartTime = Date.now();
-        
+
         // Update UI
         if (voiceRecordBtn) {
             voiceRecordBtn.classList.add('recording');
         }
-        
+
         // Emit recording status
         socket.emit('recording status', {
             roomCode: currentRoom,
             isRecording: true
         });
-        
+
     } catch (error) {
         console.error('Error accessing microphone:', error);
         showError('Microphone Access', 'Could not access microphone. Please check permissions.');
@@ -1842,19 +1842,19 @@ async function startRecording() {
 
 function stopRecording() {
     if (!isRecording || !mediaRecorder) return;
-    
+
     // Stop recording (this will trigger onstop which sends the message)
     if (mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
     }
-    
+
     isRecording = false;
-    
+
     // Update UI immediately
     if (voiceRecordBtn) {
         voiceRecordBtn.classList.remove('recording');
     }
-    
+
     // Emit recording status
     socket.emit('recording status', {
         roomCode: currentRoom,
@@ -1868,28 +1868,28 @@ if (voiceRecordBtn) {
         e.preventDefault();
         startRecording();
     });
-    
+
     voiceRecordBtn.addEventListener('mouseup', (e) => {
         e.preventDefault();
         stopRecording();
     });
-    
+
     voiceRecordBtn.addEventListener('mouseleave', (e) => {
         e.preventDefault();
         stopRecording();
     });
-    
+
     // Touch events for mobile
     voiceRecordBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         startRecording();
     });
-    
+
     voiceRecordBtn.addEventListener('touchend', (e) => {
         e.preventDefault();
         stopRecording();
     });
-    
+
     voiceRecordBtn.addEventListener('touchcancel', (e) => {
         if (e.cancelable) {
             e.preventDefault();
@@ -1901,219 +1901,136 @@ if (voiceRecordBtn) {
 // ============================================================
 // Emoji Picker
 // ============================================================
+// ============================================================
+// Emoji Picker & Action Menu
+// ============================================================
 const actionBtn = document.getElementById('action-btn');
 const floatingMenu = document.getElementById('floating-menu');
 const menuEmoji = document.getElementById('menu-emoji');
+const menuUpload = document.getElementById('menu-upload');
+const menuUrl = document.getElementById('menu-url');
 
 // Emoji picker functionality
 let isEmojiPickerOpen = false;
 
-// Toggle emoji picker
-if (emojiBtn && emojiPicker) {
-    emojiBtn.addEventListener('click', (e) => {
+// 1. Toggle Action Menu
+if (actionBtn && floatingMenu) {
+    actionBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        isEmojiPickerOpen = !isEmojiPickerOpen;
-        if (isEmojiPickerOpen) {
-            emojiPicker.style.display = 'flex';
-        } else {
+        floatingMenu.classList.toggle('active');
+        // Close emoji picker if opening menu
+        if (floatingMenu.classList.contains('active') && emojiPicker) {
             emojiPicker.style.display = 'none';
+            isEmojiPickerOpen = false;
         }
     });
-    
-    // Category tab switching
-    const emojiTabs = emojiPicker.querySelectorAll('.emoji-tab');
-    const emojiCategories = emojiPicker.querySelectorAll('.emoji-category:not(.recent-emojis)');
-    const recentCategory = document.getElementById('emoji-recent');
-    
-    // Initialize: show smileys by default
-    if (emojiCategories.length > 0) {
-        emojiCategories[0].classList.add('active');
-    }
-    
-    emojiTabs.forEach(tab => {
-        tab.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const category = tab.dataset.category;
-            
-            // Update active tab
-            emojiTabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            
-            if (category === 'recent') {
-                // Show recent emojis
-                emojiCategories.forEach(cat => cat.classList.remove('active'));
-                if (recentCategory) {
-                    recentCategory.style.display = 'grid';
-                    updateRecentEmojisUI();
-                }
-            } else {
-                // Show selected category
-                if (recentCategory) recentCategory.style.display = 'none';
-                emojiCategories.forEach(cat => {
-                    cat.classList.remove('active');
-                    if (cat.dataset.category === category) {
-                        cat.classList.add('active');
-                    }
-                });
-            }
-        });
+}
+
+// 2. Menu Item Handlers
+if (menuUpload && fileInput) {
+    menuUpload.addEventListener('click', (e) => {
+        e.stopPropagation();
+        floatingMenu.classList.remove('active');
+        fileInput.click();
     });
-    
-    // Emoji item click - insert at cursor position
-    emojiPicker.addEventListener('click', (e) => {
-        const emojiItem = e.target.closest('.emoji-item');
-        if (emojiItem) {
-            e.stopPropagation();
-            const emoji = emojiItem.textContent.trim() || emojiItem.dataset.emoji;
-            if (emoji) {
-                insertEmojiAtCursor(emoji);
-            }
+}
+
+if (menuUrl) {
+    menuUrl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        floatingMenu.classList.remove('active');
+        const url = prompt('Enter image URL:');
+        if (url) {
+            socket.emit('chat message', {
+                type: 'image-url',
+                url: url
+            });
         }
     });
-    
-    // Initialize recent emojis on picker open
-    emojiBtn.addEventListener('click', () => {
+}
+
+// 3. Emoji Picker Toggle
+// 3. Emoji Picker Toggle
+if (menuEmoji && emojiPicker) {
+    menuEmoji.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isHidden = emojiPicker.style.display === 'none' || emojiPicker.style.display === '';
+        emojiPicker.style.display = isHidden ? 'flex' : 'none';
+        isEmojiPickerOpen = isHidden; // Sync state
+        if (floatingMenu) floatingMenu.classList.remove('active'); // Close the + menu
+
         if (isEmojiPickerOpen) {
             updateRecentEmojisUI();
         }
     });
 }
 
-// Recent emojis management with frequency tracking (top 30)
-const RECENT_EMOJIS_KEY = 'glchat_recent_emojis';
-const MAX_RECENT_EMOJIS = 30;
+// 4. Emoji Item Click - Insert & Category Switching
+if (emojiPicker) {
+    // Typing Emojis into the Input Bar
+    emojiPicker.addEventListener('click', (e) => {
+        const item = e.target.closest('.emoji-item');
+        if (item) {
+            e.stopPropagation(); // Prevent closing picker immediately
+            // Get the emoji character (if twemoji is active, it uses the alt text)
+            let emoji = item.dataset.emoji;
+            if (!emoji) {
+                const img = item.querySelector('img');
+                emoji = img ? img.alt : item.textContent.trim();
+            }
 
-function getRecentEmojis() {
-    try {
-        const stored = localStorage.getItem(RECENT_EMOJIS_KEY);
-        if (!stored) return [];
-        
-        const data = JSON.parse(stored);
-        // Return array of { emoji, count } sorted by frequency
-        return Array.isArray(data) ? data : [];
-    } catch (e) {
-        return [];
-    }
-}
-
-function addRecentEmoji(emoji) {
-    try {
-        let recent = getRecentEmojis();
-        
-        // Find existing emoji or create new entry
-        const existingIndex = recent.findIndex(e => e.emoji === emoji);
-        
-        if (existingIndex >= 0) {
-            // Increment frequency
-            recent[existingIndex].count++;
-            // Move to front (most recently used)
-            const item = recent.splice(existingIndex, 1)[0];
-            recent.unshift(item);
-        } else {
-            // Add new emoji with count 1
-            recent.unshift({ emoji: emoji, count: 1 });
+            if (emoji) {
+                insertEmojiAtCursor(emoji);
+            }
         }
-        
-        // Sort by frequency (count), then by recency
-        recent.sort((a, b) => {
-            if (b.count !== a.count) return b.count - a.count;
-            return recent.indexOf(a) - recent.indexOf(b);
-        });
-        
-        // Keep only top MAX_RECENT_EMOJIS
-        recent = recent.slice(0, MAX_RECENT_EMOJIS);
-        
-        localStorage.setItem(RECENT_EMOJIS_KEY, JSON.stringify(recent));
-        updateRecentEmojisUI();
-    } catch (e) {
-        console.error('Failed to save recent emoji:', e);
-    }
-}
+    });
 
-function updateRecentEmojisUI() {
-    const recentContainer = document.getElementById('emoji-recent');
-    if (!recentContainer) return;
-    
-    const recent = getRecentEmojis();
-    if (recent.length === 0) {
-        recentContainer.style.display = 'none';
-        return;
-    }
-    
-    recentContainer.style.display = 'grid';
-    // Display emojis ordered by frequency
-    recentContainer.innerHTML = recent.map(item => {
-        const emoji = typeof item === 'string' ? item : item.emoji;
-        return `<span class="emoji-item" data-emoji="${emoji}">${emoji}</span>`;
-    }).join('');
-    
-    // Add click handlers
-    recentContainer.querySelectorAll('.emoji-item').forEach(item => {
-        item.addEventListener('click', (e) => {
+    // Category Switching
+    const catBtns = emojiPicker.querySelectorAll('.emoji-cat-btn, .emoji-tab'); // Support both classes
+    catBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const emoji = item.dataset.emoji;
-            insertEmojiAtCursor(emoji);
-            messageInput.focus();
+            const target = btn.dataset.category || btn.dataset.target;
+
+            // Update Buttons
+            catBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // Update Categories
+            emojiPicker.querySelectorAll('.emoji-category').forEach(cat => cat.classList.remove('active'));
+
+            // Handle recent separately or as a standard category
+            if (target === 'recent') {
+                const recentCat = document.getElementById('emoji-recent');
+                if (recentCat) {
+                    recentCat.classList.add('active');
+                    updateRecentEmojisUI();
+                }
+            } else {
+                const targetCat = emojiPicker.querySelector(`.emoji-category[data-category="${target}"]`);
+                if (targetCat) targetCat.classList.add('active');
+            }
         });
     });
 }
 
-// Zero-latency emoji insertion at cursor position
-function insertEmojiAtCursor(emoji) {
-    const input = messageInput;
-    if (!input) return;
-    
-    // Get current cursor position
-    const start = input.selectionStart || 0;
-    const end = input.selectionEnd || 0;
-    const text = input.value;
-    
-    // Insert emoji at cursor position
-    input.value = text.substring(0, start) + emoji + text.substring(end);
-    
-    // Set cursor position after inserted emoji (zero-latency)
-    const newPosition = start + emoji.length;
-    input.setSelectionRange(newPosition, newPosition);
-    
-    // Maintain focus for keyboard input
-    input.focus();
-    
-    // Trigger input event for any listeners (typing indicator, etc.)
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    
-    // Save to recent emojis
-    addRecentEmoji(emoji);
-}
-
-// Close emoji picker when clicking outside
+// 5. Close Picker when clicking outside
 document.addEventListener('click', (e) => {
-    if (emojiPicker && isEmojiPickerOpen) {
-        if (!emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
+    // Hide Floating Menu
+    if (floatingMenu && floatingMenu.classList.contains('active')) {
+        if (!floatingMenu.contains(e.target) && e.target !== actionBtn) {
+            floatingMenu.classList.remove('active');
+        }
+    }
+
+    // Hide Emoji Picker
+    if (emojiPicker && emojiPicker.style.display === 'flex') {
+        if (!emojiPicker.contains(e.target) && e.target.id !== 'menu-emoji') {
             emojiPicker.style.display = 'none';
             isEmojiPickerOpen = false;
         }
     }
-    floatingMenu.style.display = 'none';
 });
-
-// Legacy action menu emoji button
-if (menuEmoji) {
-    menuEmoji.addEventListener('click', (e) => {
-        e.stopPropagation();
-        floatingMenu.style.display = 'none';
-        if (emojiPicker) {
-            emojiPicker.style.display = 'flex';
-            isEmojiPickerOpen = true;
-        }
-    });
-}
-
-if (actionBtn) {
-    actionBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        floatingMenu.style.display = floatingMenu.style.display === 'flex' ? 'none' : 'flex';
-    });
-}
 
 // ============================================================
 // Mobile Menu Toggle
@@ -2147,7 +2064,7 @@ window.addEventListener('resize', () => {
         onlineUsersContainer.classList.remove('mobile-open');
         sidebarOverlay.classList.remove('active');
     }
-    
+
     // Update mobile game UI visibility
     const mobileRoleBadge = document.getElementById('mobile-role-badge');
     const mobileGameActions = document.getElementById('mobile-game-actions');
@@ -2184,3 +2101,113 @@ gameActionButtons.forEach(btn => {
         }
     });
 });
+
+// ============================================================
+// Emoji Helpers (Restored)
+// ============================================================
+
+// Recent emojis management with frequency tracking (top 30)
+const RECENT_EMOJIS_KEY = 'glchat_recent_emojis';
+const MAX_RECENT_EMOJIS = 30;
+
+function getRecentEmojis() {
+    try {
+        const stored = localStorage.getItem(RECENT_EMOJIS_KEY);
+        if (!stored) return [];
+
+        const data = JSON.parse(stored);
+        // Return array of { emoji, count } sorted by frequency
+        return Array.isArray(data) ? data : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function addRecentEmoji(emoji) {
+    try {
+        let recent = getRecentEmojis();
+
+        // Find existing emoji or create new entry
+        const existingIndex = recent.findIndex(e => e.emoji === emoji);
+
+        if (existingIndex >= 0) {
+            // Increment frequency
+            recent[existingIndex].count++;
+            // Move to front (most recently used)
+            const item = recent.splice(existingIndex, 1)[0];
+            recent.unshift(item);
+        } else {
+            // Add new emoji with count 1
+            recent.unshift({ emoji: emoji, count: 1 });
+        }
+
+        // Sort by frequency (count), then by recency
+        recent.sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return recent.indexOf(a) - recent.indexOf(b);
+        });
+
+        // Keep only top MAX_RECENT_EMOJIS
+        recent = recent.slice(0, MAX_RECENT_EMOJIS);
+
+        localStorage.setItem(RECENT_EMOJIS_KEY, JSON.stringify(recent));
+        updateRecentEmojisUI();
+    } catch (e) {
+        console.error('Failed to save recent emoji:', e);
+    }
+}
+
+function updateRecentEmojisUI() {
+    const recentContainer = document.getElementById('emoji-recent');
+    if (!recentContainer) return;
+
+    const recent = getRecentEmojis();
+    if (recent.length === 0) {
+        recentContainer.style.display = 'none';
+        return;
+    }
+
+    recentContainer.style.display = 'grid';
+    // Display emojis ordered by frequency
+    recentContainer.innerHTML = recent.map(item => {
+        const emoji = typeof item === 'string' ? item : item.emoji;
+        return `<span class="emoji-item" data-emoji="${emoji}">${emoji}</span>`;
+    }).join('');
+
+    // Add click handlers
+    recentContainer.querySelectorAll('.emoji-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const emoji = item.dataset.emoji;
+            insertEmojiAtCursor(emoji);
+            messageInput.focus();
+        });
+    });
+}
+
+// Zero-latency emoji insertion at cursor position
+function insertEmojiAtCursor(emoji) {
+    const input = messageInput;
+    if (!input) return;
+
+    // Get current cursor position
+    const start = input.selectionStart || 0;
+    const end = input.selectionEnd || 0;
+    const text = input.value;
+
+    // Insert emoji at cursor position
+    input.value = text.substring(0, start) + emoji + text.substring(end);
+
+    // Set cursor position after inserted emoji (zero-latency)
+    const newPosition = start + emoji.length;
+    input.setSelectionRange(newPosition, newPosition);
+
+    // Maintain focus for keyboard input
+    input.focus();
+
+    // Trigger input event for any listeners (typing indicator, etc.)
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Save to recent emojis
+    addRecentEmoji(emoji);
+}

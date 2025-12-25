@@ -97,31 +97,18 @@
             </div>
             <div class="input-area">
                 <div id="action-menu-container" class="action-menu-container">
-                    <button id="action-btn" class="action-btn">+</button>
+                    <button id="action-btn" class="action-btn" title="Actions">+</button>
                     <div id="floating-menu" class="floating-menu">
                         <div class="menu-item" id="menu-emoji"><span class="icon">😊</span> Emojis</div>
+                        <div class="menu-divider"></div>
+                        <div class="menu-item" id="menu-upload"><span class="icon">🖼️</span> Upload Image</div>
+                        <div class="menu-item" id="menu-url"><span class="icon">🔗</span> Image URL</div>
                     </div>
                 </div>
-                <button id="attach-btn" class="attach-btn" title="Attach">+</button>
                 <input id="message-input" type="text" placeholder="Type a message..." autocomplete="off">
                 <input type="file" id="file-input" accept="image/*" style="display: none;">
                 <button id="voice-record-btn" class="voice-record-btn" title="Record voice message">🎤</button>
                 <button id="send-button">Send</button>
-                <!-- Attachment Menu -->
-                <div id="attach-menu" class="attach-menu" style="display: none;">
-                    <button class="attach-option" id="upload-image-btn">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M19 7v2.99s-1.99.01-2 0V7c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-2.99s2 .01 2 0V17c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V7c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2zm-3 5l-4-4-4 4h8z"/>
-                        </svg>
-                        <span>Upload Image</span>
-                    </button>
-                    <button class="attach-option" id="image-url-btn">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>
-                        </svg>
-                        <span>Image by URL</span>
-                    </button>
-                </div>
                 <div id="emoji-picker" class="emoji-picker" style="display: none;">
                     <div class="emoji-picker-content">
                         <!-- Recently Used Emojis -->

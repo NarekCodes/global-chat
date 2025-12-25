@@ -70,11 +70,12 @@ body {
 }
 
 @media (max-width: 768px) {
+
     .mobile-menu-btn,
     .mobile-members-btn {
         display: block;
     }
-    
+
     .chat-header h1 {
         flex: 1;
         margin: 0 10px;
@@ -240,8 +241,10 @@ body {
     border-radius: 25px;
     outline: none;
     transition: border-color 0.3s;
-    font-size: 16px; /* Prevent iOS auto-zoom */
-    min-height: 44px; /* Touch-friendly */
+    font-size: 16px;
+    /* Prevent iOS auto-zoom */
+    min-height: 44px;
+    /* Touch-friendly */
 }
 
 #message-input:focus {
@@ -291,10 +294,13 @@ body {
 }
 
 @keyframes pulse-recording {
-    0%, 100% {
+
+    0%,
+    100% {
         transform: scale(1);
         box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
     }
+
     50% {
         transform: scale(1.1);
         box-shadow: 0 0 0 10px rgba(255, 68, 68, 0);
@@ -450,7 +456,8 @@ body {
     font-weight: bold;
     font-size: 1rem;
     transition: background 0.3s;
-    min-height: 44px; /* Touch-friendly */
+    min-height: 44px;
+    /* Touch-friendly */
 }
 
 .login-container button:hover {
@@ -514,10 +521,12 @@ body {
     border: 2px solid #eee;
     border-radius: 12px;
     outline: none;
-    font-size: 16px; /* Prevent iOS auto-zoom */
+    font-size: 16px;
+    /* Prevent iOS auto-zoom */
     margin-bottom: 15px;
     transition: border-color 0.3s, box-shadow 0.3s;
-    min-height: 44px; /* Touch-friendly */
+    min-height: 44px;
+    /* Touch-friendly */
 }
 
 .landing-card input:focus {
@@ -1050,11 +1059,11 @@ body {
         transform: translateX(-100%);
         box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
     }
-    
+
     .sidebar.mobile-open {
         transform: translateX(0);
     }
-    
+
     .sidebar-overlay {
         position: fixed;
         top: 0;
@@ -1066,7 +1075,7 @@ body {
         display: none;
         backdrop-filter: blur(2px);
     }
-    
+
     .sidebar-overlay.active {
         display: block;
     }
@@ -1097,7 +1106,7 @@ body {
         box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
         transition: transform 0.3s ease;
     }
-    
+
     .online-users-container.mobile-open {
         transform: translateX(0);
     }
@@ -1199,6 +1208,7 @@ body {
         opacity: 0;
         transform: scale(0.9) translateY(-5px);
     }
+
     to {
         opacity: 1;
         transform: scale(1) translateY(0);
@@ -1370,6 +1380,7 @@ body {
         opacity: 0;
         transform: translateY(10px) scale(0.95);
     }
+
     to {
         opacity: 1;
         transform: translateY(0) scale(1);
@@ -1457,6 +1468,7 @@ body {
     0% {
         background-position: 200% 0;
     }
+
     100% {
         background-position: -200% 0;
     }
@@ -1472,7 +1484,7 @@ body {
 }
 
 /* Group multiple images */
-.message-container + .message-container .message-image-container {
+.message-container+.message-container .message-image-container {
     margin-top: 4px;
 }
 
@@ -1502,6 +1514,7 @@ body {
         opacity: 0;
         transform: translateY(10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -1597,15 +1610,20 @@ body {
 
 /* Emoji bounce animation for click */
 @keyframes emojiBounce {
-    0%, 100% {
+
+    0%,
+    100% {
         transform: scale(1) translateY(0);
     }
+
     25% {
         transform: scale(1.2) translateY(-10px);
     }
+
     50% {
         transform: scale(1.1) translateY(-5px);
     }
+
     75% {
         transform: scale(1.15) translateY(-8px);
     }
@@ -1683,9 +1701,11 @@ body {
         transform: scale(0.5);
         opacity: 0;
     }
+
     50% {
         transform: scale(1.1);
     }
+
     100% {
         transform: scale(1.0);
         opacity: 1;
@@ -1701,15 +1721,20 @@ body {
 
 /* Emoji bounce animation for click */
 @keyframes emojiBounce {
-    0%, 100% {
+
+    0%,
+    100% {
         transform: scale(1) translateY(0);
     }
+
     25% {
         transform: scale(1.2) translateY(-10px);
     }
+
     50% {
         transform: scale(1.1) translateY(-5px);
     }
+
     75% {
         transform: scale(1.15) translateY(-8px);
     }
@@ -2023,7 +2048,7 @@ body {
         height: 100%;
         border-radius: 0;
     }
-    
+
     .input-area {
         padding: 15px;
         padding-bottom: max(15px, env(safe-area-inset-bottom, 15px));
@@ -2031,21 +2056,21 @@ body {
         border-top: 1px solid #ddd;
         position: relative;
     }
-    
+
     .messages-area {
         padding: 15px;
         padding-bottom: max(15px, env(safe-area-inset-bottom, 15px));
     }
-    
+
     .chat-header {
         padding: 15px;
         min-height: 60px;
     }
-    
+
     .mobile-game-actions {
         bottom: max(90px, calc(90px + env(safe-area-inset-bottom, 0px)));
     }
-    
+
     /* Position typing indicator above input on mobile */
     .typing-indicator {
         position: absolute;
@@ -2492,10 +2517,14 @@ body {
 }
 
 @keyframes jump {
-    0%, 80%, 100% {
+
+    0%,
+    80%,
+    100% {
         transform: translateY(0);
         opacity: 0.7;
     }
+
     40% {
         transform: translateY(-8px);
         opacity: 1;
@@ -2549,4 +2578,258 @@ body {
         background-color: transparent;
         box-shadow: none;
     }
+}
+
+/* ============================================================
+   UPDATED EMOJI PICKER & ACTION MENU (Consolidated)
+   ============================================================ */
+
+/* Action Menu Container */
+.action-menu-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.action-btn {
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    margin-right: 5px;
+    font-size: 1.5rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: var(--primary-color);
+    border: none;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.action-btn:hover {
+    background: rgba(106, 17, 203, 0.1);
+    transform: rotate(45deg);
+}
+
+/* Floating Menu */
+.floating-menu {
+    position: absolute;
+    bottom: 60px;
+    left: 0;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+    padding: 8px 0;
+    width: 200px;
+    display: none;
+    z-index: 1001;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    animation: menuFadeIn 0.2s ease;
+}
+
+.floating-menu.active {
+    display: block !important;
+}
+
+.floating-menu .menu-item {
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 0.95rem;
+    color: #333;
+    font-weight: 500;
+}
+
+.floating-menu .menu-item .icon {
+    font-size: 1.2rem;
+    width: 24px;
+    text-align: center;
+}
+
+.floating-menu .menu-item:hover {
+    background: #f5f5f5;
+    color: var(--primary-color);
+}
+
+.floating-menu .menu-divider {
+    height: 1px;
+    background: #eee;
+    margin: 5px 0;
+}
+
+@keyframes menuFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Emoji Picker Container */
+.emoji-picker {
+    position: absolute;
+    bottom: 85px;
+    /* Sits above the input area */
+    left: 20px;
+    width: 320px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    z-index: 2000;
+    display: none;
+    /* Controlled by JS */
+    flex-direction: column;
+    border: 1px solid #ddd;
+    overflow: hidden;
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Category Tabs */
+.emoji-picker-header {
+    display: flex;
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    padding: 5px;
+}
+
+.emoji-cat-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 8px;
+    cursor: pointer;
+    font-size: 1.2rem;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.emoji-cat-btn:hover,
+.emoji-cat-btn.active {
+    background: rgba(106, 17, 203, 0.1);
+}
+
+/* Emoji Grid - This puts them next to each other */
+.emoji-picker-content {
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 10px;
+    scrollbar-width: thin;
+    scrollbar-color: #ddd transparent;
+}
+
+.emoji-picker-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.emoji-picker-content::-webkit-scrollbar-thumb {
+    background-color: #ddd;
+    border-radius: 3px;
+}
+
+.emoji-category {
+    display: none;
+    grid-template-columns: repeat(8, 1fr);
+    /* 8 emojis per row */
+    gap: 4px;
+}
+
+.emoji-category.active {
+    display: grid;
+}
+
+/* Recent emojis specific layout - align with main grid */
+.emoji-category.recent-emojis {
+    display: none;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+/* Emoji Item - Fixes the "Gigant" size */
+.emoji-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 1.4rem;
+    transition: transform 0.1s, background 0.2s;
+    user-select: none;
+}
+
+.emoji-item:hover {
+    background: #f0f2f5;
+    transform: scale(1.1);
+}
+
+.emoji-item:active {
+    transform: scale(0.95);
+}
+
+/* Force Twemoji images to stay small if they are used */
+.emoji-item img.emoji {
+    width: 24px !important;
+    height: 24px !important;
+}
+
+/* Legacy Footer Styles (Optional - kept if structure uses it instead of header) */
+.emoji-picker-footer {
+    border-top: 1px solid #eee;
+    padding: 10px;
+    background: #fdfdfd;
+}
+
+.emoji-category-tabs {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 10px;
+}
+
+.emoji-tab {
+    background: none;
+    border: none;
+    cursor: pointer;
+    opacity: 0.4;
+    transition: all 0.2s;
+    padding: 6px;
+    border-radius: 8px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.emoji-tab:hover {
+    opacity: 0.8;
+    background: rgba(0, 0, 0, 0.03);
+}
+
+.emoji-tab.active {
+    opacity: 1;
+    background: rgba(106, 17, 203, 0.1);
+    color: var(--primary-color);
 }
