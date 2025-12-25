@@ -475,6 +475,32 @@
         <div id="ctx-kick" class="context-item danger-action">👢 Kick User</div>
     </div>
 
+    <!-- Image Upload Modal (Unified for File Upload & URL) -->
+    <div id="image-upload-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modal-title">Send Image</h3>
+                <button id="close-modal-btn" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="image-preview-container">
+                    <div id="preview-placeholder">No image selected</div>
+                    <img id="upload-preview" src="" alt="Preview" style="display: none;">
+                </div>
+                
+                <div id="url-input-section" style="display: none; padding: 10px 15px;">
+                    <input type="text" id="external-url-input" placeholder="Paste image URL here...">
+                </div>
+
+                <input type="text" id="image-caption-input" placeholder="Add a caption...">
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-upload-btn" class="btn-secondary">Cancel</button>
+                <button id="confirm-upload-btn" class="btn-primary">Send</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lottie-web@5.12.2/build/player/lottie.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>

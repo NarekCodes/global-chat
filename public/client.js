@@ -994,67 +994,36 @@ function renderMessage(data) {
             const contentDiv = document.createElement('div');
             contentDiv.classList.add('message-content');
 
-            // Get emoji layout with Telegram-style detection
-            const emojiLayout = getEmojiLayout(text);
+            // Logic to detect if message is ONLY emojis (up to 3)
+            const emojiRegex = /^(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff]|\s)+$/g;
+            const isSystem = data.username === 'SYSTEM';
+            const isEmojiOnly = !isSystem && emojiRegex.test(text);
+            
+            // Count emojis using the same pattern as detection
+            const emojiCount = isEmojiOnly ? [...text.matchAll(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu)].length : 0;
 
-            if (emojiLayout.isOnly && emojiLayout.count > 0) {
-                // Jumbo emoji message - exact Telegram scaling
-                messageDiv.classList.add('message-jumbo-emoji', emojiLayout.size);
-                contentDiv.classList.add('message-text', 'jumbo-content');
-
-                // Force Apple Emoji or JoyPixels SVG via CDN
-                // Using Twemoji (Twitter's emoji set) which is high-quality and consistent
-                if (typeof twemoji !== 'undefined') {
-                    contentDiv.innerHTML = twemoji.parse(text, {
-                        folder: 'svg',
-                        ext: '.svg',
-                        base: 'https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/'
-                    });
-
-                    // Add telegramPop animation on load (only for single emoji)
-                    if (emojiLayout.count === 1) {
-                        setTimeout(() => {
-                            contentDiv.classList.add('telegram-pop');
-                        }, 10);
-                    }
-
-                    // Add click handler for animated emoji support
-                    contentDiv.addEventListener('click', (e) => {
-                        if (e.target.tagName === 'IMG' && e.target.classList.contains('emoji')) {
-                            const emojiCode = getEmojiAssetCode(e.target.alt || text);
-                            renderAnimatedEmoji(emojiCode, e.target);
-
-                            // Visual feedback
-                            e.target.style.animation = 'none';
-                            setTimeout(() => {
-                                e.target.style.animation = 'emojiBounce 0.5s ease';
-                            }, 10);
-                        }
-                    });
-                } else {
-                    // Fallback if Twemoji not loaded
-                    contentDiv.innerHTML = escapeHtml(text);
-                    if (emojiLayout.count === 1) {
-                        contentDiv.classList.add('telegram-pop');
-                    }
-                }
-            } else {
-                // Regular text message with inline emojis (1.2rem)
-                contentDiv.classList.add('message-text', 'inline-emoji');
-                const escapedText = escapeHtml(text);
-
-                // Use Twemoji to render emojis inline
-                if (typeof twemoji !== 'undefined') {
-                    contentDiv.innerHTML = twemoji.parse(escapedText, {
-                        folder: 'svg',
-                        ext: '.svg',
-                        base: 'https://cdn.jsdelivr.net/npm/twemoji@14.0.2/assets/'
-                    });
-                } else {
-                    contentDiv.innerHTML = escapedText;
+            let emojiClass = '';
+            if (isEmojiOnly && emojiCount > 0 && emojiCount <= 3) {
+                if (emojiCount === 1) {
+                    emojiClass = 'jumbo-emoji-1';
+                    // Remove bubble background for single emoji (Telegram style)
+                    messageDiv.classList.add('no-bubble');
+                } else if (emojiCount === 2) {
+                    emojiClass = 'jumbo-emoji-2';
+                } else if (emojiCount === 3) {
+                    emojiClass = 'jumbo-emoji-3';
                 }
             }
 
+            // Create message text div with emoji class
+            const messageTextDiv = document.createElement('div');
+            messageTextDiv.classList.add('message-text');
+            if (emojiClass) {
+                messageTextDiv.classList.add(emojiClass);
+            }
+            messageTextDiv.textContent = text; // Use textContent, not innerHTML (no Twemoji)
+
+            contentDiv.appendChild(messageTextDiv);
             messageDiv.appendChild(contentDiv);
         }
 
@@ -1926,95 +1895,451 @@ if (actionBtn && floatingMenu) {
     });
 }
 
-// 2. Menu Item Handlers
-if (menuUpload && fileInput) {
-    menuUpload.addEventListener('click', (e) => {
-        e.stopPropagation();
-        floatingMenu.classList.remove('active');
-        fileInput.click();
-    });
+// ============================================================
+// Image Upload Modal (Unified for File Upload & URL)
+// ============================================================
+const uploadModal = document.getElementById('image-upload-modal');
+const modalTitle = document.getElementById('modal-title');
+const urlSection = document.getElementById('url-input-section');
+const externalUrlInput = document.getElementById('external-url-input');
+const previewImg = document.getElementById('upload-preview');
+const placeholder = document.getElementById('preview-placeholder');
+const captionInput = document.getElementById('image-caption-input');
+const closeModalBtn = document.getElementById('close-modal-btn');
+const cancelUploadBtn = document.getElementById('cancel-upload-btn');
+const confirmUploadBtn = document.getElementById('confirm-upload-btn');
+
+// Utility function to close the image upload modal
+function closeImageModal() {
+    if (uploadModal) {
+        uploadModal.style.display = 'none';
+    }
+    if (fileInput) {
+        fileInput.value = ''; // Reset file input
+    }
+    if (captionInput) {
+        captionInput.value = '';
+    }
+    if (previewImg) {
+        previewImg.src = '';
+        previewImg.style.display = 'none';
+    }
+    if (placeholder) {
+        placeholder.style.display = 'flex';
+        placeholder.textContent = 'No image selected';
+    }
+    if (urlSection) {
+        urlSection.style.display = 'none';
+    }
+    if (externalUrlInput) {
+        externalUrlInput.value = '';
+    }
+    if (modalTitle) {
+        modalTitle.textContent = 'Send Image';
+    }
 }
 
+// --- 1. Handle "Image URL" Button Click ---
 if (menuUrl) {
     menuUrl.addEventListener('click', (e) => {
         e.stopPropagation();
         floatingMenu.classList.remove('active');
-        const url = prompt('Enter image URL:');
-        if (url) {
+        
+        // Reset and show URL mode
+        if (uploadModal) {
+            uploadModal.style.display = 'flex';
+        }
+        if (urlSection) {
+            urlSection.style.display = 'block';
+        }
+        if (previewImg) {
+            previewImg.style.display = 'none';
+        }
+        if (placeholder) {
+            placeholder.style.display = 'flex';
+            placeholder.textContent = 'Enter a URL to preview';
+        }
+        if (externalUrlInput) {
+            externalUrlInput.value = '';
+            setTimeout(() => externalUrlInput.focus(), 100);
+        }
+        if (modalTitle) {
+            modalTitle.textContent = 'Send Image from URL';
+        }
+    });
+}
+
+// --- 2. Live Preview for URL ---
+if (externalUrlInput && previewImg && placeholder) {
+    externalUrlInput.addEventListener('input', (e) => {
+        const url = e.target.value.trim();
+        // Check if URL looks like an image (ends with image extension or is data URL)
+        if (url.match(/\.(jpeg|jpg|gif|png|webp|svg|bmp)$/i) || url.startsWith('data:image') || url.startsWith('http')) {
+            previewImg.src = url;
+            previewImg.onload = () => {
+                previewImg.style.display = 'block';
+                placeholder.style.display = 'none';
+            };
+            previewImg.onerror = () => {
+                previewImg.style.display = 'none';
+                placeholder.style.display = 'flex';
+                placeholder.textContent = 'Invalid image URL';
+            };
+        } else if (url.length === 0) {
+            previewImg.style.display = 'none';
+            placeholder.style.display = 'flex';
+            placeholder.textContent = 'Enter a URL to preview';
+        }
+    });
+}
+
+// --- 3. Handle "Upload File" Button Click ---
+if (menuUpload && fileInput) {
+    menuUpload.addEventListener('click', (e) => {
+        e.stopPropagation();
+        floatingMenu.classList.remove('active');
+        fileInput.click(); // Open hidden system file selector
+    });
+}
+
+// Handle file selection and show modal
+if (fileInput) {
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                // Setup Modal for File mode
+                if (uploadModal) {
+                    uploadModal.style.display = 'flex';
+                }
+                if (urlSection) {
+                    urlSection.style.display = 'none'; // Hide URL box
+                }
+                if (previewImg) {
+                    previewImg.src = event.target.result;
+                    previewImg.style.display = 'block';
+                }
+                if (placeholder) {
+                    placeholder.style.display = 'none';
+                }
+                if (modalTitle) {
+                    modalTitle.textContent = 'Send Image';
+                }
+                // Focus caption input after a short delay to ensure modal is visible
+                setTimeout(() => {
+                    if (captionInput) {
+                        captionInput.focus();
+                    }
+                }, 100);
+            };
+            reader.onerror = () => {
+                showError('Upload Error', 'Failed to read image file. Please try again.');
+                closeImageModal();
+            };
+            reader.readAsDataURL(file);
+        } else if (file) {
+            showError('Invalid File', 'Please select an image file.');
+            closeImageModal();
+        }
+    });
+}
+
+// --- 4. Unified Send Logic ---
+if (confirmUploadBtn) {
+    confirmUploadBtn.addEventListener('click', () => {
+        // Determine if we're in URL mode or file mode
+        const isUrlMode = urlSection && urlSection.style.display === 'block';
+        let finalImageUrl = '';
+        
+        if (isUrlMode) {
+            finalImageUrl = externalUrlInput ? externalUrlInput.value.trim() : '';
+        } else {
+            finalImageUrl = previewImg ? previewImg.src : '';
+        }
+        
+        if (!finalImageUrl) {
+            showError('No Image', 'Please select or paste an image.');
+            return;
+        }
+        
+        const caption = captionInput ? captionInput.value.trim() : '';
+        
+        // Emit to server - use 'image-url' type for URLs, 'image' for file uploads
+        if (isUrlMode) {
             socket.emit('chat message', {
                 type: 'image-url',
-                url: url
+                url: finalImageUrl,
+                text: caption || undefined
+            });
+        } else {
+            socket.emit('chat message', {
+                type: 'image',
+                data: finalImageUrl, // Base64 data URL
+                text: caption || undefined
             });
         }
+
+        closeImageModal();
     });
 }
 
-// 3. Emoji Picker Toggle
-// 3. Emoji Picker Toggle
-if (menuEmoji && emojiPicker) {
-    menuEmoji.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isHidden = emojiPicker.style.display === 'none' || emojiPicker.style.display === '';
-        emojiPicker.style.display = isHidden ? 'flex' : 'none';
-        isEmojiPickerOpen = isHidden; // Sync state
-        if (floatingMenu) floatingMenu.classList.remove('active'); // Close the + menu
+// Close and Cancel buttons
+if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeImageModal);
+}
 
-        if (isEmojiPickerOpen) {
-            updateRecentEmojisUI();
+if (cancelUploadBtn) {
+    cancelUploadBtn.addEventListener('click', closeImageModal);
+}
+
+// Close modal when clicking outside
+if (uploadModal) {
+    uploadModal.addEventListener('click', (e) => {
+        if (e.target === uploadModal) {
+            closeImageModal();
         }
     });
 }
 
-// 4. Emoji Item Click - Insert & Category Switching
-if (emojiPicker) {
-    // Typing Emojis into the Input Bar
-    emojiPicker.addEventListener('click', (e) => {
-        const item = e.target.closest('.emoji-item');
-        if (item) {
-            e.stopPropagation(); // Prevent closing picker immediately
-            // Get the emoji character (if twemoji is active, it uses the alt text)
-            let emoji = item.dataset.emoji;
-            if (!emoji) {
-                const img = item.querySelector('img');
-                emoji = img ? img.alt : item.textContent.trim();
-            }
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && uploadModal && uploadModal.style.display === 'flex') {
+        closeImageModal();
+    }
+});
 
-            if (emoji) {
-                insertEmojiAtCursor(emoji);
+// ============================================================
+// Drag and Drop Support (Telegram-style)
+// ============================================================
+document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    // Optional: Add visual feedback when dragging over the chat area
+});
+
+document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        const file = e.dataTransfer.files[0];
+        if (file.type.startsWith('image/')) {
+            // Set the file to the input
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            if (fileInput) {
+                fileInput.files = dataTransfer.files;
+                // Trigger change event (this will show the modal in file mode)
+                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
             }
+        } else {
+            showError('Invalid File', 'Please drop an image file.');
         }
-    });
+    }
+});
 
-    // Category Switching
-    const catBtns = emojiPicker.querySelectorAll('.emoji-cat-btn, .emoji-tab'); // Support both classes
-    catBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+// menuUrl handler is now in the Image Upload Modal section above
+
+// --- Categorized Emoji Map (Telegram-style) ---
+const emojiCategories = {
+    'recent': {
+        name: 'Recently Used',
+        icon: '🕐',
+        emojis: [] // Populated from localStorage
+    },
+    'smileys': {
+        name: 'Smileys',
+        icon: '😊',
+        emojis: ['😊', '😂', '🤣', '😍', '😒', '😭', '🥺', '😎', '🤔', '🙄', '😴', '🤤', '😋', '😘', '🥰', '😇', '🤗', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '😯', '😦', '😧', '😮', '😲', '😵', '🤐', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '😈', '👿', '👹', '👺', '💀', '☠️', '💩', '🤡', '👻', '👽', '👾', '🤖']
+    },
+    'gestures': {
+        name: 'Hand Gestures',
+        icon: '👍',
+        emojis: ['👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '👋', '🤚', '🖐️', '✋', '🖖', '👏', '🙌', '🤲', '🤝', '🙏', '✍️', '💪', '🦾', '🦿', '🦵', '🦶', '👂', '🦻', '👃', '👶', '🧒', '👦', '👧', '🧑', '👱', '👨', '🧔', '👩', '🧓', '👴', '👵']
+    },
+    'activities': {
+        name: 'Activities',
+        icon: '🔥',
+        emojis: ['🔥', '✨', '🎉', '🚀', '💡', '💯', '⭐', '🌟', '💫', '⚡', '🌈', '🎈', '🎊', '🎁', '🏆', '🥇', '🥈', '🥉', '🎖️', '🏅', '🎗️', '🎫', '🎟️', '🎪', '🎭', '🎨', '🎬', '🎤', '🎧', '🎼', '🎹', '🥁', '🎷', '🎺', '🎸', '🪕', '🎻', '🎲', '♟️', '🎯', '🎳', '🎮', '🎰', '🧩', '🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐', '🚚', '🚛', '🚜', '🛴', '🚲', '🛵', '🏍️', '🛺', '✈️', '🛫', '🛬', '🛩️', '🚁', '🚟', '🚀', '🛸', '🚤', '⛵', '🛥️', '🛳️', '⛴️', '🚢']
+    },
+    'animals': {
+        name: 'Animals',
+        icon: '🐶',
+        emojis: ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐽', '🐸', '🐵', '🙈', '🙉', '🙊', '🐒', '🐔', '🐧', '🐦', '🐤', '🐣', '🐥', '🦆', '🦅', '🦉', '🦇', '🐺', '🐗', '🐴', '🦄', '🐝', '🐛', '🦋', '🐌', '🐞', '🐜', '🦗', '🕷️', '🦂', '🦟', '🦠', '🐢', '🐍', '🦎', '🦖', '🦕', '🐙', '🦑', '🦐', '🦞', '🦀', '🐡', '🐠', '🐟', '🐬', '🐳', '🐋', '🦈', '🐊', '🐅', '🐆', '🦓', '🦍', '🦧', '🐘', '🦛', '🦏', '🐪', '🐫', '🦒', '🦘', '🦡', '🐾']
+    },
+    'food': {
+        name: 'Food',
+        icon: '🍕',
+        emojis: ['🍕', '🍔', '🍟', '🌭', '🍿', '🧂', '🥓', '🥚', '🍳', '🥞', '🥐', '🥨', '🍞', '🥖', '🥯', '🧀', '🥗', '🥙', '🥪', '🌮', '🌯', '🥫', '🍝', '🍜', '🍲', '🍛', '🍣', '🍱', '🥟', '🍤', '🍙', '🍚', '🍘', '🍥', '🥠', '🥮', '🍢', '🍡', '🍧', '🍨', '🍦', '🥧', '🍰', '🎂', '🍮', '🍭', '🍬', '🍫', '🍿', '🍩', '🍪', '🌰', '🥜', '🍯', '🥛', '🍼', '☕️', '🍵', '🥤', '🍶', '🍺', '🍻', '🥂', '🍷', '🥃', '🍸', '🍹', '🧃', '🧉', '🧊', '🥢', '🍽️', '🍴', '🥄']
+    },
+    'flags': {
+        name: 'Flags',
+        icon: '🏳️',
+        emojis: ['🏳️', '🏴', '🏁', '🚩', '🏳️‍🌈', '🏳️‍⚧️', '🇺🇳', '🇺🇸', '🇬🇧', '🇨🇦', '🇦🇺', '🇩🇪', '🇫🇷', '🇮🇹', '🇪🇸', '🇯🇵', '🇰🇷', '🇨🇳', '🇮🇳', '🇧🇷', '🇷🇺', '🇲🇽', '🇦🇷', '🇨🇱', '🇨🇴', '🇵🇪', '🇻🇪', '🇿🇦', '🇪🇬', '🇳🇬', '🇰🇪', '🇪🇹', '🇲🇦', '🇹🇳', '🇩🇿', '🇸🇦', '🇦🇪', '🇮🇱', '🇹🇷', '🇮🇷', '🇮🇶', '🇸🇾', '🇯🇴', '🇱🇧', '🇵🇰', '🇦🇫', '🇮🇩', '🇹🇭', '🇻🇳', '🇵🇭', '🇲🇾', '🇸🇬', '🇳🇿', '🇫🇯', '🇵🇬', '🇵🇼', '🇳🇨', '🇻🇺', '🇳🇷', '🇰🇮', '🇹🇴', '🇼🇸', '🇦🇸', '🇬🇺', '🇲🇵', '🇵🇷', '🇻🇮', '🇬🇩', '🇧🇧', '🇧🇿', '🇯🇲', '🇭🇹', '🇨🇺', '🇩🇴', '🇭🇳', '🇬🇹', '🇳🇮', '🇨🇷', '🇵🇦', '🇧🇴', '🇵🇾', '🇺🇾', '🇧🇷', '🇪🇨', '🇬🇾', '🇸🇷', '🇬🇫', '🇬🇵', '🇲🇶', '🇲🇸', '🇦🇬', '🇧🇧', '🇧🇩', '🇧🇹', '🇧🇳', '🇰🇭', '🇱🇦', '🇲🇲', '🇲🇻', '🇲🇺', '🇳🇵', '🇵🇰', '🇱🇰', '🇹🇱', '🇹🇯', '🇹🇲', '🇺🇿', '🇰🇿', '🇰🇬', '🇹🇯', '🇲🇳', '🇧🇾', '🇲🇩', '🇺🇦', '🇷🇴', '🇧🇬', '🇬🇷', '🇦🇱', '🇲🇰', '🇷🇸', '🇧🇦', '🇭🇷', '🇸🇮', '🇸🇰', '🇨🇿', '🇵🇱', '🇱🇹', '🇱🇻', '🇪🇪', '🇫🇮', '🇸🇪', '🇳🇴', '🇩🇰', '🇮🇸', '🇮🇪', '🇬🇧', '🇵🇹', '🇪🇸', '🇫🇷', '🇧🇪', '🇳🇱', '🇱🇺', '🇨🇭', '🇦🇹', '🇱🇮', '🇲🇨', '🇻🇦', '🇸🇲', '🇮🇹', '🇲🇹', '🇨🇾']
+    }
+};
+
+// 1. Initialize Picker with Categories
+function initEmojiPicker() {
+    if (!emojiPicker) return;
+    
+    // Load recent emojis from localStorage
+    const recentEmojis = getRecentEmojis();
+    emojiCategories.recent.emojis = recentEmojis.slice(0, 24).map(e => typeof e === 'string' ? e : e.emoji); // Max 24 recent emojis
+    
+    // Determine default active category (recent if has emojis, otherwise smileys)
+    const defaultCategory = emojiCategories.recent.emojis.length > 0 ? 'recent' : 'smileys';
+    
+    // Build HTML structure
+    let html = `
+        <div class="emoji-picker-header">
+            <div class="emoji-tabs">
+    `;
+    
+    // Create tabs
+    Object.keys(emojiCategories).forEach(categoryId => {
+        const category = emojiCategories[categoryId];
+        const isActive = categoryId === defaultCategory;
+        html += `<button class="emoji-tab ${isActive ? 'active' : ''}" data-category="${categoryId}" title="${category.name}">${category.icon}</button>`;
+    });
+    
+    html += `
+            </div>
+        </div>
+        <div class="emoji-picker-content">
+    `;
+    
+    // Create category sections
+    Object.keys(emojiCategories).forEach(categoryId => {
+        const category = emojiCategories[categoryId];
+        const isActive = categoryId === defaultCategory;
+        const shouldShow = categoryId !== 'recent' || category.emojis.length > 0;
+        
+        html += `
+            <div class="emoji-category-section ${isActive ? 'active' : ''}" data-category="${categoryId}" id="category-${categoryId}" ${!shouldShow ? 'style="display: none;"' : ''}>
+                <div class="emoji-category-header">${category.name.toUpperCase()}</div>
+                <div class="emoji-grid">
+        `;
+        
+        category.emojis.forEach(emoji => {
+            html += `<span class="emoji-item" data-emoji="${emoji}">${emoji}</span>`;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `</div>`;
+    
+    emojiPicker.innerHTML = html;
+    
+    // Setup category tab switching
+    setupCategoryTabs();
+}
+
+// Setup category tab switching with smooth scrolling
+function setupCategoryTabs() {
+    const tabs = emojiPicker.querySelectorAll('.emoji-tab');
+    const content = emojiPicker.querySelector('.emoji-picker-content');
+    
+    tabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
             e.stopPropagation();
-            const target = btn.dataset.category || btn.dataset.target;
-
-            // Update Buttons
-            catBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            // Update Categories
-            emojiPicker.querySelectorAll('.emoji-category').forEach(cat => cat.classList.remove('active'));
-
-            // Handle recent separately or as a standard category
-            if (target === 'recent') {
-                const recentCat = document.getElementById('emoji-recent');
-                if (recentCat) {
-                    recentCat.classList.add('active');
-                    updateRecentEmojisUI();
-                }
-            } else {
-                const targetCat = emojiPicker.querySelector(`.emoji-category[data-category="${target}"]`);
-                if (targetCat) targetCat.classList.add('active');
+            const categoryId = tab.dataset.category;
+            
+            // Update active tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            // Show/hide category sections
+            const sections = emojiPicker.querySelectorAll('.emoji-category-section');
+            sections.forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            const targetSection = emojiPicker.querySelector(`#category-${categoryId}`);
+            if (targetSection) {
+                targetSection.classList.add('active');
+                
+                // Smooth scroll to category
+                targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         });
     });
 }
 
-// 5. Close Picker when clicking outside
+// 2. Click to Type in Input Bar (with selectionStart insertion)
+if (emojiPicker) {
+    emojiPicker.addEventListener('click', (e) => {
+        const item = e.target.closest('.emoji-item');
+        if (!item) return;
+        
+        e.stopPropagation(); // Prevent closing picker
+
+        // Get emoji from data attribute or textContent
+        const emojiToInsert = item.dataset.emoji || item.textContent.trim();
+
+        if (emojiToInsert && messageInput) {
+            // Insert at selectionStart (not just append)
+            const start = messageInput.selectionStart || 0;
+            const end = messageInput.selectionEnd || 0;
+            const text = messageInput.value;
+
+            messageInput.value = text.slice(0, start) + emojiToInsert + text.slice(end);
+            messageInput.focus();
+            
+            // Set cursor position after inserted emoji
+            const newPosition = start + emojiToInsert.length;
+            messageInput.setSelectionRange(newPosition, newPosition);
+            
+            // Save to recent emojis
+            addRecentEmoji(emojiToInsert);
+            
+            // Update recent category if visible
+            updateRecentEmojisInPicker();
+        }
+    });
+}
+
+// Update recent emojis in picker
+function updateRecentEmojisInPicker() {
+    if (!emojiPicker) return;
+    
+    const recentSection = emojiPicker.querySelector('#category-recent .emoji-grid');
+    if (!recentSection) return;
+    
+    const recentEmojis = getRecentEmojis().slice(0, 24);
+    emojiCategories.recent.emojis = recentEmojis.map(e => typeof e === 'string' ? e : e.emoji);
+    
+    // Update the grid
+    recentSection.innerHTML = emojiCategories.recent.emojis.map(emoji => {
+        return `<span class="emoji-item" data-emoji="${emoji}">${emoji}</span>`;
+    }).join('');
+    
+    // Show/hide recent section based on whether there are emojis
+    const categorySection = emojiPicker.querySelector('#category-recent');
+    if (categorySection) {
+        if (emojiCategories.recent.emojis.length === 0) {
+            categorySection.style.display = 'none';
+        } else {
+            categorySection.style.display = 'block';
+        }
+    }
+}
+
+// 3. Toggle Show/Hide
+if (menuEmoji && emojiPicker) {
+    menuEmoji.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = emojiPicker.style.display === 'flex';
+        emojiPicker.style.display = isVisible ? 'none' : 'flex';
+        
+        // Close the floating + menu
+        if (floatingMenu) floatingMenu.classList.remove('active');
+    });
+}
+
+// 4. Click Anywhere Else to Disappear
 document.addEventListener('click', (e) => {
     // Hide Floating Menu
     if (floatingMenu && floatingMenu.classList.contains('active')) {
@@ -2023,14 +2348,18 @@ document.addEventListener('click', (e) => {
         }
     }
 
-    // Hide Emoji Picker
-    if (emojiPicker && emojiPicker.style.display === 'flex') {
-        if (!emojiPicker.contains(e.target) && e.target.id !== 'menu-emoji') {
-            emojiPicker.style.display = 'none';
-            isEmojiPickerOpen = false;
-        }
+    // If user clicked outside picker AND outside the toggle button, hide it
+    if (emojiPicker && !emojiPicker.contains(e.target) && e.target !== menuEmoji) {
+        emojiPicker.style.display = 'none';
     }
 });
+
+// Run init on load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initEmojiPicker);
+} else {
+    initEmojiPicker();
+}
 
 // ============================================================
 // Mobile Menu Toggle
@@ -2151,7 +2480,10 @@ function addRecentEmoji(emoji) {
         recent = recent.slice(0, MAX_RECENT_EMOJIS);
 
         localStorage.setItem(RECENT_EMOJIS_KEY, JSON.stringify(recent));
+        
+        // Update both old and new UI
         updateRecentEmojisUI();
+        updateRecentEmojisInPicker();
     } catch (e) {
         console.error('Failed to save recent emoji:', e);
     }
